@@ -71,6 +71,8 @@ jobs:
           run: |
             set -eu
             chmod +x build/core/target/release/*
+            # 128 simultaneous client/server pairs exceed Haiku's default 256 FDs.
+            ulimit -n 1024
             build/core/target/release/parla-runtime-probe
             cmake -S . -B build/gui -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo
             cmake --build build/gui -j4
