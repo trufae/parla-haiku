@@ -120,7 +120,7 @@ MainWindow::MainWindow(bool smokeTest)
     auto* scroll = new BScrollView("messageScroll",fMessages,0,false,true);
     scroll->SetExplicitMinSize(BSize(380,300));
     fComposer = new Composer();
-    auto* composeScroll = new BScrollView("composeScroll",fComposer,0,false,true);
+    auto* composeScroll = new BScrollView("composeScroll",fComposer,0,false,false);
     fSend = new BButton("send","Send",new BMessage(kSend));
     fAttach = new BButton("attach","+",new BMessage('atch'));
     fAttach->SetToolTip("Attach a file");
