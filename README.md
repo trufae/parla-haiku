@@ -32,7 +32,7 @@ The [Actions workflows](https://github.com/trufae/parla-haiku/actions) produce:
 
 | Architecture | Build | Artifact |
 | --- | --- | --- |
-| `x86_64` | Haiku R1/beta6 VM; native compiler and runtime tests | `parla-haiku-x86_64` |
+| `x86_64` | Cross-built core; native GUI build and runtime tests in Haiku R1/beta6 | `parla-haiku-x86_64` |
 | `x86` (32-bit) | Linux cross-compiler, Haiku hybrid ABI, modern GCC | `parla-haiku-x86` |
 
 Download an artifact from a **successful** run, unzip it, and open the `.hpkg`
@@ -40,13 +40,19 @@ in Haiku to install it. The application is added to Deskbar. The 32-bit build
 uses the modern `x86` secondary ABI; it is not a GCC 2 / BeOS binary.
 Cross-compilation alone does not verify execution on a 32-bit Haiku system.
 
-## Build on 64-bit Haiku
+## Build the GUI on 64-bit Haiku
+
+Obtain the `chatmail-haiku-x86_64-core` artifact from a successful workflow run
+for the same source revision, and unzip its `deltachat-rpc-server` into
+`build/core/target/release/` after cloning:
 
 ```sh
-pkgman install rust_bin cmake ninja git openssl3_devel pkgconfig python3.11 llvm21_lld llvm21_clang
+pkgman install cmake ninja git openssl3 python3.11
 git clone --recurse-submodules https://github.com/trufae/parla-haiku.git
 cd parla-haiku
-RUSTFLAGS="-C linker=clang -C link-arg=-fuse-ld=lld" PYTHON=python3.11 sh scripts/build-core.sh
+mkdir -p build/core/target/release
+# Place the cross-built deltachat-rpc-server in that directory.
+chmod +x build/core/target/release/deltachat-rpc-server
 cmake -S . -B build/gui -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build/gui -j4
 ctest --test-dir build/gui --output-on-failure
@@ -60,6 +66,12 @@ the built server path. Normal installed launches find the server beside the GUI.
 Settings and profiles live in `~/config/settings/Parla`; do not delete that
 folder without exporting a backup.
 
+To build the core yourself on Linux, follow the Docker invocation in
+[the x86_64 workflow](.github/workflows/haiku.yml) and
+`scripts/cross-x86_64-core.sh`. Native Rust 1.94.1 builds on Haiku currently
+produce object files rejected by both GNU ld and LLD; CI avoids that toolchain
+problem by cross-compiling the core, then testing the result on Haiku.
+
 ## Cross-build 32-bit
 
 The complete reproducible invocation is in
@@ -71,9 +83,8 @@ ELF32 before package creation; the job fails if no hpkg is produced.
 ## Core port and verification
 
 Chatmail core 2.63.0 is a pinned submodule. Patches are applied to an exported
-build tree, leaving the submodule clean. Native builds link Haiku's OpenSSL 3;
-x86 cross-builds use pinned OpenSSL 3.5.9 with assembly disabled, as in
-HaikuPorts. SQLCipher remains bundled. TLS and OpenPGP checks remain enabled.
+build tree, leaving the submodule clean. CI cross-builds use pinned OpenSSL 3.5.9, with assembly disabled on x86 as in
+HaikuPorts. The native core build script can instead link Haiku's OpenSSL 3. SQLCipher remains bundled. TLS and OpenPGP checks remain enabled.
 Small, checksum-verified crate patches add Haiku networking support for Iroh.
 See [docs/PORTING.md](docs/PORTING.md) for details and limitations.
 
