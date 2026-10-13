@@ -1,0 +1,37 @@
+name: Haiku
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: haiku-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  haiku:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Build Chatmail core on Haiku
+        uses: vmactions/haiku-vm@7e21b66d11ab20b9cf9a76331a9d18a4ce264527
+        with:
+          release: r1beta6
+          arch: x86_64
+          mem: 8192
+          cpu: 4
+          prepare: |
+            set -eu
+            pkgman install -y rust_bin cmake ninja git openssl_devel pkgconfig python3
+          run: |
+            set -eu
+            rustc --version
+            sh scripts/build-core.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: chatmail-haiku-x86_64
+          path: build/core/target/release/deltachat-rpc-server
+          if-no-files-found: error

@@ -1,0 +1,3 @@
+[submodule "subprojects/chatmail-core"]
+	path = subprojects/chatmail-core
+	url = https://github.com/chatmail/core.git
