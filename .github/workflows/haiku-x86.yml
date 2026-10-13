@@ -8,7 +8,7 @@ permissions:
   contents: read
 concurrency:
   group: haiku-x86-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 jobs:
   x86:
     runs-on: ubuntu-24.04
