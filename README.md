@@ -4,8 +4,7 @@ A native C++17 / Haiku Interface Kit client using the real Chatmail core,
 for chatting with Delta Chat users. No GTK, Qt, WebView or Electron UI.
 The name and artwork are provisional.
 
-**Development preview:** CI builds must pass before installing their artifacts.
-Live account setup and interoperability still need testing on Haiku. This is
+**Development preview:** Live account setup and interoperability still need testing on Haiku. This is
 not yet feature-complete with [Parla](https://github.com/trufae/parla).
 
 ## What is implemented
@@ -27,6 +26,9 @@ links with another Delta Chat user using **Copy my invitation** and
 Attachments open with their native associated application after confirmation.
 
 ## Packages and architectures
+
+Download the [0.1.0 preview release](https://github.com/trufae/parla-haiku/releases/tag/v0.1.0)
+for ready-to-install **64-bit and 32-bit `.hpkg` packages**, checksums and test notes.
 
 The [Actions workflows](https://github.com/trufae/parla-haiku/actions) produce:
 
