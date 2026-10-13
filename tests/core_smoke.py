@@ -27,6 +27,15 @@ with tempfile.TemporaryDirectory(prefix="parla-core-") as directory:
         assert reply["id"] == sequence, reply
         assert "error" not in reply, (method, reply)
         return reply.get("result")
+    def send_offline(account, chat, data):
+        try:
+            call("send_msg", account, chat, data)
+        except AssertionError as error:
+            assert "No self addr configured" in str(error), error
+        else:
+            raise AssertionError("Unconfigured profile unexpectedly sent mail")
+        ids = call("get_message_ids", account, chat, False, False)
+        return ids[-1]
     try:
         info = call("get_system_info")
         assert info
@@ -34,9 +43,10 @@ with tempfile.TemporaryDirectory(prefix="parla-core-") as directory:
         call("set_config", account, "displayname", "Haiku 日本語")
         call("set_config", account, "addr", "haiku@example.org")
         assert call("get_config", account, "displayname") == "Haiku 日本語"
-        chat = call("create_chat_by_contact_id", account, 1)
+        contact = call("create_contact", account, "recipient@example.org", "Recipient")
+        chat = call("create_chat_by_contact_id", account, contact)
         text = "Native Haiku → Delta Chat\nCatalà 日本語"
-        message = call("send_msg", account, chat, dict(text=text))
+        message = send_offline(account, chat, dict(text=text))
         data = call("get_message", account, message)
         assert data["text"] == text and data["chatId"] == chat
         ids = call("get_message_ids", account, chat, False, False)
@@ -48,14 +58,14 @@ with tempfile.TemporaryDirectory(prefix="parla-core-") as directory:
         attachment = os.path.join(directory, "hello.txt")
         with open(attachment, "w") as output:
             output.write(text)
-        msg = call("send_msg", account, chat, dict(text="Attachment", file=attachment))
+        msg = send_offline(account, chat, dict(text="Attachment", file=attachment))
         saved = os.path.join(directory, "saved.txt")
         call("save_msg_file", account, msg, saved)
         with open(saved) as source:
             assert source.read() == text
         call("delete_messages", account, [message])
         assert message not in call("get_message_ids", account, chat, False, False)
-        print("core: profile, Unicode, Saved Messages, chat/message batches, attachment and deletion OK")
+        print("core: profile, Unicode, failed offline sends, chat/message batches, attachment and deletion OK")
     finally:
         server.stdin.close()
         try:

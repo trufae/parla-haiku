@@ -116,7 +116,8 @@ MainWindow::MainWindow(bool smokeTest)
             .Add(new BButton("clearAttachment","Clear attachment / reply",new BMessage('clra')))
             .AddGlue().Add(fSend).End();
     auto* split = new BSplitView(B_HORIZONTAL); split->AddChild(side); split->AddChild(conversation);
-    split->SetItemWeight(0,0.28f); split->SetItemWeight(1,0.72f);
+    split->SetItemWeight(split->GetLayout()->ItemAt(0),0.28f);
+    split->SetItemWeight(split->GetLayout()->ItemAt(1),0.72f);
     fStatus = new BStringView("status","Starting Chatmail…");
     BLayoutBuilder::Group<>(this,B_VERTICAL,0).Add(menu).Add(split).Add(fStatus);
     fAccept->Hide(); fOlder->SetEnabled(false); SetComposeEnabled(false);
@@ -333,7 +334,8 @@ void MainWindow::Events() {
                 if (c.is_number()) fStatus->SetText(c.get<int>() >= 4000 ? "Connected" : "Connecting / offline · queued messages are kept");
             });
         }
-        if (chats) RefreshChats(); if (messages) RefreshMessages();
+        if (chats) RefreshChats();
+        if (messages) RefreshMessages();
         Events();
     },0);
 }
@@ -436,7 +438,8 @@ void MainWindow::MessageReceived(BMessage* message) {
     case 'srch': RefreshChats(); break;
     case 'chat': {
         auto* item = dynamic_cast<ChatItem*>(fChats->ItemAt(fChats->CurrentSelection()));
-        if (item) SelectChat(item->id); break;
+        if (item) SelectChat(item->id);
+        break;
     }
     case 'rfrs': RefreshChats(); RefreshMessages(); Call("maybe_network",Json::array()); break;
     case 'oldr': RefreshMessages(true); break;
