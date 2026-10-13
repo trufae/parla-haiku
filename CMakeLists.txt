@@ -20,6 +20,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Haiku")
   target_compile_options(Parla PRIVATE -Wall -Wextra)
   find_program(RC_EXECUTABLE rc REQUIRED)
   find_program(XRES_EXECUTABLE xres REQUIRED)
+  set_property(TARGET Parla APPEND PROPERTY LINK_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/data/Parla.rdef")
   add_custom_command(TARGET Parla POST_BUILD
     COMMAND "${RC_EXECUTABLE}" -o "${CMAKE_CURRENT_BINARY_DIR}/Parla.rsrc" "${CMAKE_CURRENT_SOURCE_DIR}/data/Parla.rdef"
     COMMAND "${XRES_EXECUTABLE}" -o $<TARGET_FILE:Parla> "${CMAKE_CURRENT_BINARY_DIR}/Parla.rsrc")

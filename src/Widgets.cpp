@@ -66,6 +66,10 @@ void MessageItem::Update(BView* owner, const BFont* font) {
     }
     text += body;
     if (!String(data, "fileName").empty()) text += "\n[Attachment: " + String(data, "fileName") + "]";
+    std::string download = String(data, "downloadState");
+    if (download == "Available" || download == "Failure")
+        text += "\n[Use Message → Download attachment]";
+    else if (download == "InProgress") text += "\n[Downloading attachment…]";
     if (!String(data, "error").empty()) text += "\n" + String(data, "error");
     if (data.contains("reactions") && data["reactions"].is_object()) {
         auto reactions = data["reactions"].value("reactions", Json::array());
@@ -119,7 +123,7 @@ void MessageList::MouseDown(BPoint point) {
         Select(index);
         BPopUpMenu menu("Message");
         for (auto item : {std::pair<const char*, uint32>{"Reply", 'repl'}, {"Copy text", 'copy'},
-                {"Open attachment", 'open'}, {"Message details…", 'info'}, {"Retry sending", 'retr'},
+                {"Download attachment", 'down'}, {"Open attachment", 'open'}, {"Message details…", 'info'}, {"Retry sending", 'retr'},
                 {"Delete…", 'dele'}})
             menu.AddItem(new BMenuItem(item.first, new BMessage(item.second)));
         BMenuItem* chosen = menu.Go(ConvertToScreen(point));

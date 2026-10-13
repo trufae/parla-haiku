@@ -49,6 +49,8 @@ MainWindow::MainWindow(bool smokeTest)
     BPath path;
     if (find_directory(B_USER_SETTINGS_DIRECTORY, &path) != B_OK) throw std::runtime_error("Cannot find user settings");
     path.Append(kSettingsFolder); fSettings = path.Path();
+    if (fSmokeTest && getenv("DC_ACCOUNTS_PATH"))
+        fSettings = std::string(getenv("DC_ACCOUNTS_PATH")) + "-settings";
     create_directory(fSettings.c_str(), 0700); chmod(fSettings.c_str(), 0700);
     BMessage settings; BFile file((fSettings + "/window").c_str(), B_READ_ONLY);
     if (settings.Unflatten(&file) == B_OK) {
@@ -89,6 +91,7 @@ MainWindow::MainWindow(bool smokeTest)
     auto* message = new BMenu("Message"); menu->AddItem(message);
     MenuItem(message,"Reply",'repl'); MenuItem(message,"Copy text",'copy');
     MenuItem(message,"Edit…",'edit'); MenuItem(message,"React…",'reac');
+    MenuItem(message,"Download attachment",'down');
     MenuItem(message,"Open attachment",'open','O'); MenuItem(message,"Save attachment…",'save');
     MenuItem(message,"Details…",'info','I'); MenuItem(message,"Retry sending",'retr');
     MenuItem(message,"Delete…",'dele');
@@ -163,7 +166,10 @@ void MainWindow::Start() {
             fReady = true; fStatus->SetText("Ready");
             if (fSmokeTest) {
                 if (const char* marker = getenv("PARLA_SMOKE_MARKER")) std::ofstream(marker) << "GUI and Chatmail handshake OK\n";
-                PostMessage(B_QUIT_REQUESTED); return;
+                // Leave the native window visible briefly for CI's screenshot.
+                BMessage quit(B_QUIT_REQUESTED);
+                fPulse = std::make_unique<BMessageRunner>(BMessenger(this), &quit, 5000000, 1);
+                return;
             }
             Events(); LoadAccounts(); Call("start_io_for_all_accounts",Json::array());
         },20);
@@ -204,6 +210,11 @@ void MainWindow::SelectAccount(uint32 id) {
     fQuote = 0; fAttachment.clear(); fComposer->SetText("");
     Clear(fChats); Clear(fMessages); SetComposeEnabled(false);
     fTitle->SetText("Select a conversation");
+    for (int32 i = 0; i < fAccounts->CountItems(); ++i) {
+        auto* item = fAccounts->ItemAt(i); uint32 account = 0;
+        if (item->Message()) item->Message()->FindUInt32("account", &account);
+        item->SetMarked(account == id);
+    }
     Call("select_account",Json::array({id})); RefreshChats();
 }
 void MainWindow::RefreshChats() {
@@ -542,6 +553,11 @@ void MainWindow::MessageReceived(BMessage* message) {
     case 'clra': fAttachment.clear(); fQuote = 0; fDraftLabel->SetText("Enter sends · Shift+Enter adds a line"); SaveDraft(); break;
     case 'repl': if (selectedId && fCanSend) { fQuote = selectedId; fDraftLabel->SetText(("Replying to: " + String(selected,"text")).c_str()); fComposer->MakeFocus(); } break;
     case 'copy': if (selectedId) Copy(String(selected,"text")); break;
+    case 'down':
+        if (selectedId) Call("download_full_message",Json::array({fAccount,selectedId}),[this](const Json& result) {
+            if (result.is_null()) { fStatus->SetText("Attachment download queued"); RefreshMessages(); }
+        });
+        break;
     case 'open': OpenAttachment(); break;
     case 'info':
         if (selectedId) Form("Message details","Message and encryption metadata",{{"Sender:",String(selected.value("sender",Json::object()),"displayName")},
