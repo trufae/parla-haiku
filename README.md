@@ -24,12 +24,14 @@ Use **Profile → New profile** to create an identity, then exchange invitation
 links with another Delta Chat user using **Copy my invitation** and
 **Chat → Join invitation**. Enter sends; Shift+Enter inserts a newline.
 Attachments open with their native associated application after confirmation.
+Errors appear in a native alert; **Profile → Last error** retains the full
+message if the status line has changed. Profile setup and transfer show progress.
 
 ## Packages and architectures
 
-Download the [64-bit preview](https://github.com/trufae/parla-haiku/releases/tag/v0.1.0)
-or the [corrected 32-bit package](https://github.com/trufae/parla-haiku/releases/tag/v0.1.0-2),
-with checksums and test notes. The original `parla-0.1.0-1-x86.hpkg` had incorrect
+Download the [0.1.1 preview](https://github.com/trufae/parla-haiku/releases/tag/v0.1.1)
+for both 64-bit and 32-bit packages, with checksums and test notes. This fixes
+the empty native dialogs in 0.1.0 and makes core errors visible. The original `parla-0.1.0-1-x86.hpkg` had incorrect
 architecture metadata and cannot be installed on standard hybrid Haiku.
 
 The [Actions workflows](https://github.com/trufae/parla-haiku/actions) produce:
