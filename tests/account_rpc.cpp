@@ -9,6 +9,7 @@ int main() {
     uint32_t selected = 7, last = 7;
     uint64_t events = 0;
     bool failedInit = false, sent = false;
+    Json staleAccounts; uint64_t staleId = 0;
     std::set<uint32_t> configured{7}, removed;
     std::string line;
     while (std::getline(std::cin, line)) {
@@ -58,6 +59,10 @@ int main() {
             std::cerr << "Unexpected RPC: " << method << std::endl; return 1;
         }
         std::cout << Json{{"jsonrpc","2.0"},{"id",request.at("id")},{"result",result}}.dump() << std::endl;
+        if (method == "get_all_accounts" && removed.count(9) && staleId) {
+            std::cout << Json{{"jsonrpc","2.0"},{"id",staleId},{"result",staleAccounts}}.dump() << std::endl;
+            staleId = 0;
+        }
         if (method == "send_msg" && events) {
             std::cout << Json{{"jsonrpc","2.0"},{"id",events},{"result",Json::array({{
                 {"contextId",account},{"event",{{"kind","MsgFailed"},{"chatId",42},{"msgId",99}}}}})}}.dump() << std::endl;

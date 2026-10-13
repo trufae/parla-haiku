@@ -187,8 +187,8 @@ void FormWindow::MessageReceived(BMessage* message) {
 ChatItem::ChatItem(const Json& data) : id(data.value("id", 0u)),
     fName(String(data,"name")), fPreview(String(data,"summaryText2")),
     fUnread(data.value("freshMessageCounter",0u)) {
-    if (data.value("isSelfTalk",false)) fPreview = "Private notes to yourself";
-    if (data.value("isDeviceTalk",false)) fPreview = "Notices from Chatmail";
+    if (data.value("isSelfTalk",false) && (fPreview.empty() || fPreview == "No messages.")) fPreview = "Private notes to yourself";
+    if (data.value("isDeviceTalk",false) && (fPreview.empty() || fPreview == "No messages.")) fPreview = "Notices from Chatmail";
     auto path = String(data,"avatarPath");
     if (!path.empty()) fAvatar.reset(BTranslationUtils::GetBitmap(path.c_str()));
     unsigned color = 0x607d8b; auto hex = String(data,"color");

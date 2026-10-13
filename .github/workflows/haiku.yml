@@ -82,6 +82,7 @@ jobs:
             sh tests/gui_smoke.sh
             cp build/gui/forms-native.png dist/parla-forms.png
             cp build/gui/diagnostics-native.png dist/parla-diagnostics.png
+            cp build/gui/conversation-native.png dist/parla-conversation.png
       - uses: actions/upload-artifact@v4
         with:
           name: parla-haiku-x86_64
@@ -90,4 +91,5 @@ jobs:
             dist/parla-native.png
             dist/parla-forms.png
             dist/parla-diagnostics.png
+            dist/parla-conversation.png
           if-no-files-found: error

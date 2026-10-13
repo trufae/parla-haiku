@@ -21,7 +21,7 @@ private:
     void Call(const char* method, Json params, Callback callback = {}, int timeout = 60);
     void Start();
     void LoadAccounts();
-    void SelectAccount(uint32 id);
+    void SelectAccount(uint32 id, bool force = false);
     void DraftLabel(const std::string& text);
     void RefreshChats();
     void SelectChat(uint32 id);

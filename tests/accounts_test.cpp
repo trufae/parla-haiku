@@ -96,6 +96,10 @@ public:
                 fWindow->PostMessage('prof'); ++fStage;
             } else if (fStage == 12) {
                 if (!Submit("New profile", {}, true)) return;
+                for (int32 i = 0; i < CountWindows(); ++i) {
+                    auto* window = WindowAt(i);
+                    if (dynamic_cast<BAlert*>(window)) window->PostMessage(B_QUIT_REQUESTED);
+                }
                 BMessage select('acct'); select.AddUInt32("account",9); fWindow->PostMessage(&select); ++fStage;
             } else if (fStage == 13) {
                 CHECK(fWindow->Lock());
@@ -107,12 +111,18 @@ public:
                 CHECK(fWindow->Lock());
                 auto* send = dynamic_cast<BButton*>(fWindow->FindView("send"));
                 auto* composer = dynamic_cast<BTextView*>(fWindow->FindView("message"));
-                bool ready = send && send->IsEnabled();
+                auto* messages = dynamic_cast<BListView*>(fWindow->FindView("messages"));
+                bool ready = send && send->IsEnabled() && messages && messages->CountItems() == 2;
                 if (ready) { CHECK(composer->Bounds().Height() < 40);
                     auto* attach = fWindow->FindView("attach");
                     CHECK(attach && fabsf(attach->Bounds().Width()-attach->Bounds().Height()) < 2);
                     CHECK(attach->Bounds().Width() < 45);
-                    CHECK(fWindow->FindView("messageScroll")->Bounds().Height() > fWindow->Bounds().Height() * .65); composer->SetText("PRIVATE_MESSAGE_BODY"); CHECK(send->Invoke() == B_OK); }
+                    CHECK(fWindow->FindView("messageScroll")->Bounds().Height() > fWindow->Bounds().Height() * .65);
+                    BBitmap* bitmap = nullptr;
+                    CHECK(BScreen(fWindow).GetBitmap(&bitmap) == B_OK);
+                    BBitmapStream stream(bitmap); BFile file("conversation-native.png",B_WRITE_ONLY | B_CREATE_FILE | B_ERASE_FILE);
+                    CHECK(BTranslatorRoster::Default()->Translate(&stream,nullptr,nullptr,&file,B_PNG_FORMAT) == B_OK);
+                    composer->SetText("PRIVATE_MESSAGE_BODY"); CHECK(send->Invoke() == B_OK); }
                 fWindow->Unlock(); if (ready) ++fStage;
             } else if (fStage == 15) {
                 if (Status().find("SMTP fixture: connection refused") == std::string::npos) return;

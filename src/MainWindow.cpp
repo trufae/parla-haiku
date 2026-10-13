@@ -309,15 +309,15 @@ void MainWindow::WriteDrafts() {
     { std::ofstream file(temp); file << all.dump(); if (!file) { ShowError("Cannot save draft"); return; } }
     chmod(temp.c_str(),0600); rename(temp.c_str(),(fSettings + "/drafts.json").c_str());
 }
-void MainWindow::SelectAccount(uint32 id) {
+void MainWindow::SelectAccount(uint32 id, bool force) {
     if (!id || fDeletingAccounts.count(id)) return;
     fDesiredAccount = id;
     if (fSelecting) return; // Serialize core selection; IDs are never menu indexes.
-    if (id == fAccount) return;
+    if (id == fAccount && !force) return;
     fSelecting = true;
     Call("select_account",Json::array({id}),[this,id](const Json& result) {
         fSelecting = false;
-        if (fDesiredAccount != id) { SelectAccount(fDesiredAccount); return; }
+        if (fDesiredAccount != id) { SelectAccount(fDesiredAccount,true); return; }
         if (!result.is_null() || fDeletingAccounts.count(id)) { LoadAccounts(); return; }
         SaveDraft(); fAccount = id; fChat = 0; ++fGeneration; ++fChatRequest;
         fRefreshing = fRefreshAgain = false;
