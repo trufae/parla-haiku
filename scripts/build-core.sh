@@ -16,5 +16,12 @@ if [ "$(uname -s)" = Haiku ]; then
     export RUSTFLAGS="${RUSTFLAGS:-} -C link-arg=-lnetwork"
 fi
 # Bundle current SQLCipher, use system OpenSSL. TLS verification is unchanged.
-cargo build --locked --release -p deltachat-rpc-server \
-    --no-default-features --features deltachat/haiku
+set -- build --locked --release -p deltachat-rpc-server --no-default-features --features deltachat/haiku
+if [ -n "${CORE_TARGET:-}" ]; then
+    set -- "$@" --target "$CORE_TARGET" -Zbuild-std=std,panic_abort
+fi
+if [ -n "${CORE_RUST_TOOLCHAIN:-}" ]; then
+    cargo "+$CORE_RUST_TOOLCHAIN" "$@"
+else
+    cargo "$@"
+fi

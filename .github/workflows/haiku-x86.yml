@@ -1,0 +1,34 @@
+name: Haiku x86 (32-bit)
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: haiku-x86-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  x86:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Cross-build 32-bit GUI, core and hpkg
+        run: |
+          docker run --rm -v "$PWD:/work" -w /work ghcr.io/haiku/cross-compiler:x86_gcc2h-r1beta5 \
+            bash -ec '
+              apt-get update
+              apt-get install -y curl ca-certificates perl patch pkg-config unzip
+              curl --proto "=https" --tlsv1.2 -sSf https://sh.rustup.rs -o /tmp/rustup.sh
+              sh /tmp/rustup.sh -y --profile minimal --default-toolchain nightly-2026-10-01 --component rust-src
+              export PATH="$HOME/.cargo/bin:$PATH"
+              bash scripts/cross-x86.sh
+            '
+      - uses: actions/upload-artifact@v4
+        with:
+          name: parla-haiku-x86
+          path: dist/*-x86.hpkg
+          if-no-files-found: error
