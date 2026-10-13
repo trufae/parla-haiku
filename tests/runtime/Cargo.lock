@@ -34,6 +34,7 @@ dependencies = [
 name = "parla-runtime-probe"
 version = "0.1.0"
 dependencies = [
+ "libc",
  "mio",
  "tokio",
 ]

@@ -3,5 +3,6 @@ name = "parla-runtime-probe"
 version = "0.1.0"
 edition = "2021"
 [dependencies]
+libc = "0.2"
 mio = { version = "=1.2.0", features = ["net", "os-poll"] }
 tokio = { version = "=1.53.1", features = ["rt-multi-thread", "net", "io-util", "time", "sync"] }

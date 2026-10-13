@@ -20,6 +20,29 @@ fn wake_regression() {
     }
     println!("poll: wake survives register, reregister and deregister");
 }
+fn nonblocking_regression() {
+    use std::os::fd::AsRawFd;
+    fn check(socket: &impl AsRawFd) {
+        let flags = unsafe { libc::fcntl(socket.as_raw_fd(), libc::F_GETFL) };
+        assert!(flags >= 0 && flags & libc::O_NONBLOCK != 0,
+            "BLOCKING SOCKET: an async socket must not block a runtime worker");
+    }
+    let listener = mio::net::TcpListener::bind("127.0.0.1:0".parse().unwrap()).unwrap();
+    check(&listener);
+    let stream = mio::net::TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+    check(&stream);
+    let deadline = std::time::Instant::now() + Duration::from_secs(2);
+    loop {
+        match listener.accept() {
+            Ok((accepted, _)) => { check(&accepted); break; }
+            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock && std::time::Instant::now() < deadline =>
+                std::thread::sleep(Duration::from_millis(1)),
+            Err(e) => panic!("accept failed: {e}"),
+        }
+    }
+    check(&mio::net::UdpSocket::bind("127.0.0.1:0".parse().unwrap()).unwrap());
+    println!("sockets: TCP listener, client, accepted stream and UDP are nonblocking");
+}
 async fn sockets() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
@@ -63,8 +86,9 @@ async fn sockets() {
 }
 fn main() {
     // Independent watchdog still exits if the executor AND its timers stop.
-    std::thread::spawn(|| { std::thread::sleep(Duration::from_secs(45)); std::process::exit(2); });
+    std::thread::spawn(|| { std::thread::sleep(Duration::from_secs(45)); eprintln!("runtime watchdog: no completion after 45 seconds"); std::process::exit(2); });
     wake_regression();
+    nonblocking_regression();
     for workers in [2, 4] {
         let runtime = tokio::runtime::Builder::new_multi_thread().worker_threads(workers).enable_all().build().unwrap();
         runtime.block_on(sockets());
