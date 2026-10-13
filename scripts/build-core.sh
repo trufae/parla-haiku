@@ -16,6 +16,9 @@ if [ "$(uname -s)" = Haiku ]; then
     export OPENSSL_INCLUDE_DIR=/boot/system/develop/headers
     export RUSTFLAGS="${RUSTFLAGS:-} -C link-arg=-lnetwork"
 fi
+# Keep names and line tables: stripped Rust/C frames made device faults opaque.
+export CARGO_PROFILE_RELEASE_STRIP=none
+export CARGO_PROFILE_RELEASE_DEBUG=1
 # Bundle current SQLCipher, use system OpenSSL. TLS verification is unchanged.
 set -- build --locked --release -p deltachat-rpc-server --no-default-features --features deltachat/haiku
 if [ -n "${CORE_TARGET:-}" ]; then

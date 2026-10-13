@@ -21,6 +21,11 @@ jobs:
         run: |
           docker build -f .github/docker/x86.Dockerfile -t parla-haiku-x86 .github/docker
           docker run --rm -v "$PWD:/work" -w /work parla-haiku-x86 bash scripts/cross-x86.sh
+      - name: Run 32-bit crypto stack ABI regression
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qemu-user
+          python3 tests/x86_stack_alignment.py build-x86/core/target/i686-unknown-haiku/release/deltachat-rpc-server
       - uses: actions/upload-artifact@v4
         with:
           name: parla-haiku-x86

@@ -1,0 +1,15 @@
+--- a/build.rs
++++ b/build.rs
+@@ -588,6 +588,12 @@
+         let is_msvc_not_clang_cl = compiler.is_like_msvc() && !compiler.is_like_clang_cl();
+         if !is_msvc_not_clang_cl {
+             let _ = c.flag("-msse2");
++            // Haiku's 32-bit C ABI guarantees only 4-byte stack alignment.
++            // SSE2 code (notably fiat_p256_mul) needs aligned local spills even
++            // when called by Rust or by a legacy-ABI native thread/callback.
++            if target.os == "haiku" {
++                let _ = c.flag("-mstackrealign");
++            }
+         }
+     }
+ 
