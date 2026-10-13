@@ -16,7 +16,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
-      - name: Build Chatmail core on Haiku
+      - name: Build and test native Haiku package
         uses: vmactions/haiku-vm@7e21b66d11ab20b9cf9a76331a9d18a4ce264527
         with:
           release: r1beta6
@@ -25,13 +25,19 @@ jobs:
           cpu: 4
           prepare: |
             set -eu
-            pkgman install -y rust_bin cmake ninja git openssl_devel pkgconfig python3.11
+            pkgman install -y rust_bin cmake ninja git openssl3_devel pkgconfig python3.11
           run: |
             set -eu
             rustc --version
+            cmake -S . -B build/gui -G Ninja -DCMAKE_BUILD_TYPE=Release
+            cmake --build build/gui -j4
+            ctest --test-dir build/gui --output-on-failure
             sh scripts/build-core.sh
+            python3.11 tests/core_smoke.py build/core/target/release/deltachat-rpc-server
+            sh scripts/package.sh
+            sh tests/gui_smoke.sh
       - uses: actions/upload-artifact@v4
         with:
-          name: chatmail-haiku-x86_64
-          path: build/core/target/release/deltachat-rpc-server
+          name: parla-haiku-x86_64
+          path: dist/*.hpkg
           if-no-files-found: error
