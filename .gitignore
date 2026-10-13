@@ -2,3 +2,5 @@
 /dist/
 *.hpkg
 /core-artifact/
+
+/tests/runtime/target/

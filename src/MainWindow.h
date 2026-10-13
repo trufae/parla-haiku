@@ -22,6 +22,7 @@ private:
     void Start();
     void LoadAccounts();
     void SelectAccount(uint32 id);
+    void DraftLabel(const std::string& text);
     void RefreshChats();
     void SelectChat(uint32 id);
     void RefreshMessages(bool older = false);
@@ -55,10 +56,15 @@ private:
     std::unique_ptr<BFilePanel> fPanel;
     std::unique_ptr<BMessageRunner> fPulse;
     uint32 fAccount = 0, fChat = 0, fQuote = 0;
-    uint64_t fGeneration = 0, fChatRequest = 0, fMessageRequest = 0;
+    uint64_t fGeneration = 0, fChatRequest = 0, fMessageRequest = 0, fAccountListRequest = 0;
     bool fReady = false, fCanSend = false, fSending = false, fRefreshing = false, fRefreshAgain = false;
     bool fSmokeTest = false, fArchived = false;
-    bool fEventsPending = false;
+    bool fEventsPending = false, fSelecting = false;
+    uint32 fDesiredAccount = 0;
+    int fConnectionTicks = 0;
+    std::set<uint32> fDeletingAccounts, fConnectionPending, fStartedAccounts;
+    bigtime_t fLastReply = 0;
+    std::map<uint32,std::string> fConnectionDetails;
     int fEventRetryTicks = 0;
     size_t fLimit = 100;
     std::string fAttachment, fSettings;

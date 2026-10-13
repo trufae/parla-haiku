@@ -33,7 +33,7 @@ fi
 cp "$root/subprojects/chatmail-core/LICENSE" "$payload/documentation/packages/parla/Chatmail-MPL-2.0"
 cat > "$payload/.PackageInfo" <<INFO
 name $name
-version 0.1.4-$revision
+version 0.1.5-$revision
 architecture $package_arch
 summary "Native Chatmail and Delta Chat client"
 description "A native Haiku Interface Kit messaging client with bundled Chatmail core."
@@ -46,7 +46,7 @@ licenses {
     "MIT"
     "Apache v2"
 }
-provides { $name = 0.1.4 }
+provides { $name = 0.1.5 }
 requires {
     haiku$([ "$arch" = x86 ] && printf _x86 || true)
 $([ "$arch" = x86_64 ] && printf '    lib:libssl >= 3\n    lib:libcrypto >= 3' || true)
@@ -54,5 +54,5 @@ $([ "$arch" = x86_64 ] && printf '    lib:libssl >= 3\n    lib:libcrypto >= 3' |
 }
 INFO
 cd "$payload"
-package create "$root/dist/$name-0.1.4-$revision-$package_arch.hpkg"
-package list "$root/dist/$name-0.1.4-$revision-$package_arch.hpkg"
+package create "$root/dist/$name-0.1.5-$revision-$package_arch.hpkg"
+package list "$root/dist/$name-0.1.5-$revision-$package_arch.hpkg"

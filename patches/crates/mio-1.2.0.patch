@@ -1,0 +1,69 @@
+--- a/src/sys/unix/selector/poll.rs
++++ b/src/sys/unix/selector/poll.rs
+@@ -223,27 +223,29 @@
+                 return Ok(());
+             }
+ 
+-            let waker_events;
+             let notified;
+             let mut num_fd_events;
+             if self.notify_waker.fd().is_some() {
+-                waker_events = fds.poll_fds[0].0.revents;
+-                notified = waker_events != 0;
++                notified = fds.poll_fds[0].0.revents != 0;
+                 num_fd_events = if notified { num_events - 1 } else { num_events }
+             } else {
+-                waker_events = 0;
+                 notified = self.notify_waker.woken();
+                 num_fd_events = num_events;
+             };
+ 
+-            let pending_wake_token = self.pending_wake_token.lock().unwrap().take();
++            // Keep wake() from publishing another token between taking the
++            // current token and draining its notification from the pipe.
++            let mut wake_guard = self.pending_wake_token.lock().unwrap();
++            let pending_wake_token = wake_guard.take();
+ 
+             if notified {
+                 self.notify_waker.ack_and_reset();
+-                if pending_wake_token.is_some() {
+-                    num_fd_events += 1;
+-                }
+-            }
++            }
++            if pending_wake_token.is_some() {
++                num_fd_events += 1;
++            }
++
++            drop(wake_guard);
+ 
+             // We now check whether this poll was performed with descriptors which were pending
+             // for removal and filter out any matching.
+@@ -261,7 +263,7 @@
+                 if let Some(pending_wake_token) = pending_wake_token {
+                     events.push(Event {
+                         token: pending_wake_token,
+-                        events: waker_events,
++                        events: libc::POLLIN,
+                     });
+                 }
+ 
+@@ -398,14 +400,13 @@
+         self.waiting_operations.fetch_add(1, Ordering::SeqCst);
+ 
+         // Wake up the current caller of `wait` if there is one.
+-        let sent_notification = self.notify_waker.wake().is_ok();
++        let _ = self.notify_waker.wake();
+ 
+         let mut fds = self.fds.lock().unwrap();
+ 
+-        // If there was no caller of `wait` our notification was not removed from the pipe.
+-        if sent_notification {
+-            self.notify_waker.ack_and_reset();
+-        }
++        // Only select() may drain this shared notification. A registration can
++        // race with a user wake (or happen before the next poll); draining here
++        // would leave pending_wake_token set but no readable notification fd.
+ 
+         let res = f(&mut *fds);
+ 

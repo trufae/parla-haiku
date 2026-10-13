@@ -24,7 +24,8 @@ int main() {
             result = Json::array();
             for (uint32_t id = 7; id <= last; ++id) if (!removed.count(id))
                 result.push_back({{"id",id},{"kind",configured.count(id) ? "Configured" : "Unconfigured"},{"displayName","Fixture"}});
-        } else if (method == "get_selected_account_id") result = selected;
+        } // Simulate a stale selection snapshot after deletion; UI must validate IDs.
+        else if (method == "get_selected_account_id") result = removed.count(9) ? 9 : selected;
         else if (method == "add_account") result = ++last;
         else if (method == "select_account") selected = account;
         else if (method == "remove_account") { removed.insert(account); if (selected == account) selected = 7; }
@@ -40,7 +41,7 @@ int main() {
         else if (method == "send_msg") { result = 99; sent = true; }
         else if (method == "get_message") result = {{"error","SMTP fixture: connection refused"}};
         else if (method == "is_configured") result = configured.count(account) != 0;
-        else if (method == "get_connectivity") result = 4000;
+        else if (method == "get_connectivity_html") result = "<html><head><style>HIDDEN_CSS</style></head><body><h3>Incoming messages</h3><li>Connected</li><h3>Outgoing messages</h3><li>SMTP: retry &lt;pending&gt; &amp; waiting</li></body></html>";
         else if (method == "get_config") result = nullptr;
         else if (method == "list_transports") result = configured.count(account) ? Json::array({{
             {"addr","fixture@example.invalid"},{"imapServer","imap.example.invalid"},{"smtpServer","smtp.example.invalid"},

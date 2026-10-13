@@ -29,3 +29,15 @@ if [ -n "${CORE_RUST_TOOLCHAIN:-}" ]; then
 else
     cargo "$@"
 fi
+
+# Use the same patched Mio/Tokio versions for an executable native runtime probe.
+set -- build --locked --release --manifest-path "$root/tests/runtime/Cargo.toml" \
+    --target-dir "$build/core/target" --config "patch.crates-io.mio.path=\"$build/core/haiku-crates/mio-1.2.0\""
+if [ -n "${CORE_TARGET:-}" ]; then
+    set -- "$@" --target "$CORE_TARGET" -Zbuild-std=std,panic_abort
+fi
+if [ -n "${CORE_RUST_TOOLCHAIN:-}" ]; then
+    cargo "+$CORE_RUST_TOOLCHAIN" "$@"
+else
+    cargo "$@"
+fi

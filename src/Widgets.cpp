@@ -21,8 +21,10 @@ std::string String(const Json& value, const char* key, const std::string& fallba
 Composer::Composer() : BTextView("message", B_WILL_DRAW | B_NAVIGABLE) {
     SetWordWrap(true); SetViewUIColor(B_DOCUMENT_BACKGROUND_COLOR);
     SetLowUIColor(B_DOCUMENT_BACKGROUND_COLOR);
-    SetExplicitMinSize(BSize(180, 38));
-    SetExplicitMaxSize(BSize(B_SIZE_UNLIMITED, 56));
+    font_height metrics; GetFontHeight(&metrics);
+    float height = ceilf(metrics.ascent + metrics.descent + metrics.leading) + 8;
+    SetExplicitMinSize(BSize(180,height));
+    SetExplicitMaxSize(BSize(B_SIZE_UNLIMITED,height));
 }
 void Composer::KeyDown(const char* bytes, int32 count) {
     if (count == 1 && bytes[0] == B_ENTER && !(modifiers() & B_SHIFT_KEY))
@@ -106,7 +108,14 @@ void MessageItem::DrawItem(BView* owner, BRect rect, bool) {
     BRect bubble = rect; bubble.InsetBy(6, 4);
     if (fOutgoing) bubble.left += 24; else bubble.right -= 24;
     rgb_color base = ui_color(IsSelected() ? B_LIST_SELECTED_BACKGROUND_COLOR : B_PANEL_BACKGROUND_COLOR);
-    owner->SetHighColor(fOutgoing && !IsSelected() ? tint_color(base, 0.85f) : base);
+    // Blend with theme colors to preserve light/dark theme text contrast.
+    if (!IsSelected() && fOutgoing) {
+        rgb_color accent = ui_color(B_CONTROL_HIGHLIGHT_COLOR);
+        base = {uint8((3 * base.red + accent.red) / 4),
+            uint8((3 * base.green + accent.green) / 4),
+            uint8((3 * base.blue + accent.blue) / 4),255};
+    }
+    owner->SetHighColor(base);
     owner->FillRoundRect(bubble, 6, 6);
     owner->SetHighUIColor(IsSelected() ? B_LIST_SELECTED_ITEM_TEXT_COLOR : B_LIST_ITEM_TEXT_COLOR);
     BFont font; owner->GetFont(&font); BFont small(font); small.SetSize(font.Size() * 0.88f);
@@ -178,6 +187,8 @@ void FormWindow::MessageReceived(BMessage* message) {
 ChatItem::ChatItem(const Json& data) : id(data.value("id", 0u)),
     fName(String(data,"name")), fPreview(String(data,"summaryText2")),
     fUnread(data.value("freshMessageCounter",0u)) {
+    if (data.value("isSelfTalk",false)) fPreview = "Private notes to yourself";
+    if (data.value("isDeviceTalk",false)) fPreview = "Notices from Chatmail";
     auto path = String(data,"avatarPath");
     if (!path.empty()) fAvatar.reset(BTranslationUtils::GetBitmap(path.c_str()));
     unsigned color = 0x607d8b; auto hex = String(data,"color");
@@ -215,10 +226,10 @@ DiagnosticsWindow::DiagnosticsWindow(const std::string& summary, const std::stri
     : BWindow(BRect(30,40,820,580),"Parla diagnostics",B_TITLED_WINDOW,B_AUTO_UPDATE_SIZE_LIMITS | B_CLOSE_ON_ESCAPE) {
     fSummary = new BTextView("diagnosticSummary", B_WILL_DRAW | B_NAVIGABLE);
     fSummary->MakeEditable(false); fSummary->SetWordWrap(true); fSummary->SetText(summary.c_str());
-    fSummary->SetExplicitMinSize(BSize(400,130)); fSummary->SetExplicitMaxSize(BSize(B_SIZE_UNLIMITED,160));
+    fSummary->SetExplicitMinSize(BSize(570,165)); fSummary->SetExplicitMaxSize(BSize(B_SIZE_UNLIMITED,200));
     fText = new BTextView("diagnostics", B_WILL_DRAW | B_NAVIGABLE);
     fText->MakeEditable(false); fText->SetWordWrap(true); fText->SetText(text.c_str());
-    fText->SetExplicitMinSize(BSize(400,220));
+    fText->SetExplicitMinSize(BSize(570,220));
     auto* scroll = new BScrollView("logs",fText,0,false,true);
     BLayoutBuilder::Group<>(this,B_VERTICAL).SetInsets(B_USE_WINDOW_SPACING)
         .Add(new BScrollView("summary",fSummary,0,false,true))

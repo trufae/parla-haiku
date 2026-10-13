@@ -40,5 +40,6 @@ sh "$root/scripts/build-core.sh"
 # Transport the actual Haiku binary to the native runtime-test job.
 mkdir -p "$root/core-artifact"
 cp "$BUILD_DIR/core/target/x86_64-unknown-haiku/release/deltachat-rpc-server" "$root/core-artifact/"
+cp "$BUILD_DIR/core/target/x86_64-unknown-haiku/release/parla-runtime-probe" "$root/core-artifact/"
 file "$root/core-artifact/deltachat-rpc-server" | tee "$BUILD_DIR/architecture.txt"
 grep -q 'ELF 64-bit' "$BUILD_DIR/architecture.txt"

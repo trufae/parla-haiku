@@ -23,6 +23,8 @@
 #include <cstdio>
 #include <ctime>
 #include <Invoker.h>
+#include "DiagnosticText.h"
+#include <cmath>
 
 namespace {
 void Clear(BListView* list) { while (auto* item = list->RemoveItem(int32(0))) delete item; }
@@ -112,36 +114,43 @@ MainWindow::MainWindow(bool smokeTest)
     chatScroll->SetExplicitMinSize(BSize(200,250));
     auto* side = new BGroupView(B_VERTICAL);
     BLayoutBuilder::Group<>(side,B_VERTICAL).SetInsets(B_USE_DEFAULT_SPACING)
-        .Add(fSearch).Add(chatScroll).Add(new BButton("new","New chat…",new BMessage('newc')));
+        .Add(fSearch,0).Add(chatScroll,1).Add(new BButton("new","New chat…",new BMessage('newc')),0);
     fTitle = new BStringView("title","Welcome to Parla");
     fMessages = new MessageList(); fMessages->SetInvocationMessage(new BMessage('open'));
     auto* scroll = new BScrollView("messageScroll",fMessages,0,false,true);
-    scroll->SetExplicitMinSize(BSize(380,220));
+    scroll->SetExplicitMinSize(BSize(380,300));
     fComposer = new Composer();
     auto* composeScroll = new BScrollView("composeScroll",fComposer,0,false,true);
     fSend = new BButton("send","Send",new BMessage(kSend));
     fAttach = new BButton("attach","+",new BMessage('atch'));
     fAttach->SetToolTip("Attach a file");
+    font_height metrics; be_plain_font->GetHeight(&metrics);
+    float buttonSize = ceilf(metrics.ascent + metrics.descent + metrics.leading) + 12;
+    fAttach->SetExplicitMinSize(BSize(buttonSize,buttonSize));
+    fAttach->SetExplicitPreferredSize(BSize(buttonSize,buttonSize));
+    fAttach->SetExplicitMaxSize(BSize(buttonSize,buttonSize));
+    composeScroll->SetExplicitMinSize(BSize(180,buttonSize));
+    composeScroll->SetExplicitMaxSize(BSize(B_SIZE_UNLIMITED,buttonSize));
     fAccept = new BButton("accept","Accept contact request",new BMessage('acpt'));
     fOlder = new BButton("older","Load earlier messages",new BMessage('oldr'));
     fDraftLabel = new BStringView("draft","");
     fComposer->SetToolTip("Enter sends · Shift+Enter adds a line");
     auto* conversation = new BGroupView(B_VERTICAL);
     BLayoutBuilder::Group<>(conversation,B_VERTICAL).SetInsets(B_USE_DEFAULT_SPACING)
-        .AddGroup(B_HORIZONTAL).Add(fTitle).AddGlue().Add(fAccept).End()
-        .Add(fOlder).Add(scroll, 1).Add(fDraftLabel)
-        .AddGroup(B_HORIZONTAL).Add(fAttach).Add(composeScroll, 1).Add(fSend).End();
+        .AddGroup(B_HORIZONTAL,B_USE_DEFAULT_SPACING,0).Add(fTitle).AddGlue().Add(fAccept).End()
+        .Add(fOlder,0).Add(scroll,1).Add(fDraftLabel,0)
+        .AddGroup(B_HORIZONTAL,B_USE_DEFAULT_SPACING,0).Add(fAttach,0).Add(composeScroll,1).Add(fSend,0).End();
     auto* clear = new BMenuItem("Clear attachment / reply", new BMessage('clra'));
     message->AddItem(clear);
     auto* split = new BSplitView(B_HORIZONTAL); split->AddChild(side); split->AddChild(conversation);
-    split->SetItemWeight(split->GetLayout()->ItemAt(0),0.28f);
-    split->SetItemWeight(split->GetLayout()->ItemAt(1),0.72f);
+    split->SetItemWeight(split->GetLayout()->ItemAt(0),0.32f);
+    split->SetItemWeight(split->GetLayout()->ItemAt(1),0.68f);
     fStatus = new BStringView("status","Starting Chatmail…");
     fStatus->SetTruncation(B_TRUNCATE_END);
     fTitle->SetTruncation(B_TRUNCATE_END);
     fDraftLabel->SetTruncation(B_TRUNCATE_END);
-    BLayoutBuilder::Group<>(this,B_VERTICAL,0).Add(menu).Add(split).Add(fStatus);
-    fAccept->Hide(); fOlder->Hide(); fOlder->SetEnabled(false); SetComposeEnabled(false);
+    BLayoutBuilder::Group<>(this,B_VERTICAL,0).Add(menu,0).Add(split,1).Add(fStatus,0);
+    fDraftLabel->Hide(); fAccept->Hide(); fOlder->Hide(); fOlder->SetEnabled(false); SetComposeEnabled(false);
     BMessage pulse('tick'); fPulse = std::make_unique<BMessageRunner>(BMessenger(this), &pulse, 500000);
     PostMessage('boot');
 }
@@ -177,8 +186,10 @@ void MainWindow::Log(const std::string& text) {
     fLogChanged = true;
 }
 void MainWindow::Diagnostics() {
-    std::string text = fStartup + "\nActive profile: " + std::to_string(fAccount)
-        + (fReady ? " · RPC connected\n" : " · RPC disconnected\n")
+    std::string text = std::string("Parla ") + kAppVersion + " · " + std::to_string(sizeof(void*) * 8) + "-bit\n"
+        + fConnectionDetails[fAccount] + "\nActive profile: " + std::to_string(fAccount)
+        + (fReady ? " · RPC pipe open\n" : " · RPC disconnected\n")
+        + "Last reply: " + (fLastReply ? std::to_string((system_time()-fLastReply)/1000000) + "s ago" : "none") + "\n"
         + "Last error: " + (fLastError.empty() ? "none" : fLastError);
     if (!fDiagnosticsWindow.IsValid()) fDiagnosticsWindow = BMessenger(new DiagnosticsWindow(text, fLog));
     else { BMessage update('logs'); update.AddString("summary",text.c_str()); update.AddString("text",fLog.c_str()); fDiagnosticsWindow.SendMessage(&update); }
@@ -239,28 +250,50 @@ void MainWindow::Start() {
                 fPulse = std::make_unique<BMessageRunner>(BMessenger(this), &quit, 5000000, 1);
                 return;
             }
-            Events(); LoadAccounts(); Call("start_io_for_all_accounts",Json::array());
+            Events(); LoadAccounts();
         },20);
     } catch (const std::exception& e) { ShowError(e.what()); }
 }
 void MainWindow::LoadAccounts() {
-    Call("get_all_accounts",Json::array(),[this](const Json& accounts) {
-        if (!accounts.is_array()) return;
+    const auto request = ++fAccountListRequest;
+    Call("get_all_accounts",Json::array(),[this,request](const Json& accounts) {
+        if (request != fAccountListRequest || !accounts.is_array()) return;
+        std::set<uint32> ids;
         while (auto* item = fAccounts->RemoveItem(int32(0))) delete item;
         for (const auto& account : accounts) {
             uint32 id = account.value("id",0u);
+            if (!id || fDeletingAccounts.count(id)) continue;
+            ids.insert(id);
+            // Avoid holding the core's global accounts write lock while starting
+            // every scheduler. Each profile starts independently and idempotently.
+            if (String(account,"kind") != "Unconfigured" && !fSetupAccounts.count(id)
+                && fStartedAccounts.insert(id).second) {
+                Call("start_io",Json::array({id}),[this,id](const Json& result) {
+                    if (!result.is_null()) fStartedAccounts.erase(id);
+                    else { Log("Network tasks started profile=" + std::to_string(id)); Connection(id); }
+                });
+            }
             std::string label = String(account,"displayName","Profile " + std::to_string(id));
             if (String(account,"kind") == "Unconfigured") label += " (setup incomplete)";
             auto* m = new BMessage('acct'); m->AddUInt32("account",id);
             auto* item = new BMenuItem(label.c_str(),m); item->SetMarked(id == fAccount); fAccounts->AddItem(item);
             item->SetTarget(this);
         }
-        if (!fAccount && !accounts.empty()) {
-            Call("get_selected_account_id",Json::array(),[this,accounts](const Json& selected) {
-                SelectAccount(selected.is_number() ? selected.get<uint32>() : accounts[0].value("id",0u));
+        if (fAccount && !ids.count(fAccount) && !fDeletingAccounts.count(fAccount)) {
+            fAccount = fChat = fQuote = 0; ++fGeneration; ++fChatRequest;
+            fRefreshing = fRefreshAgain = false;
+            fComposer->SetText(""); fAttachment.clear(); DraftLabel("");
+            Clear(fChats); Clear(fMessages); SetComposeEnabled(false);
+        }
+        if (!fAccount && !fSelecting && !ids.empty()) {
+            Call("get_selected_account_id",Json::array(),[this,ids,request](const Json& selected) {
+                if (request != fAccountListRequest || fAccount || fSelecting) return;
+                uint32 id = selected.is_number_unsigned() ? selected.get<uint32>() : 0;
+                SelectAccount(ids.count(id) ? id : *ids.begin());
             });
         }
-        if (accounts.empty()) { fTitle->SetText("Create a profile to start chatting"); PostMessage('prof'); }
+        if (ids.empty() && !fSelecting && fDeletingAccounts.empty())
+            fTitle->SetText("Create a profile to start chatting");
     });
 }
 void MainWindow::SaveDraft() {
@@ -277,16 +310,32 @@ void MainWindow::WriteDrafts() {
     chmod(temp.c_str(),0600); rename(temp.c_str(),(fSettings + "/drafts.json").c_str());
 }
 void MainWindow::SelectAccount(uint32 id) {
-    SaveDraft(); fAccount = id; fChat = 0; ++fGeneration; fRefreshing = false; fRefreshAgain = false;
-    fQuote = 0; fAttachment.clear(); fComposer->SetText("");
-    Clear(fChats); Clear(fMessages); SetComposeEnabled(false);
-    fTitle->SetText("Select a conversation");
-    for (int32 i = 0; i < fAccounts->CountItems(); ++i) {
-        auto* item = fAccounts->ItemAt(i); uint32 account = 0;
-        if (item->Message()) item->Message()->FindUInt32("account", &account);
-        item->SetMarked(account == id);
-    }
-    Call("select_account",Json::array({id})); RefreshChats(); Connection(id);
+    if (!id || fDeletingAccounts.count(id)) return;
+    fDesiredAccount = id;
+    if (fSelecting) return; // Serialize core selection; IDs are never menu indexes.
+    if (id == fAccount) return;
+    fSelecting = true;
+    Call("select_account",Json::array({id}),[this,id](const Json& result) {
+        fSelecting = false;
+        if (fDesiredAccount != id) { SelectAccount(fDesiredAccount); return; }
+        if (!result.is_null() || fDeletingAccounts.count(id)) { LoadAccounts(); return; }
+        SaveDraft(); fAccount = id; fChat = 0; ++fGeneration; ++fChatRequest;
+        fRefreshing = fRefreshAgain = false;
+        fQuote = 0; fAttachment.clear(); fComposer->SetText(""); DraftLabel("");
+        Clear(fChats); Clear(fMessages); SetComposeEnabled(false);
+        fTitle->SetText("Select a conversation");
+        for (int32 i = 0; i < fAccounts->CountItems(); ++i) {
+            auto* item = fAccounts->ItemAt(i);
+            item->SetMarked(item->Message() && item->Message()->GetUInt32("account",0) == id);
+        }
+        Log("Selected profile=" + std::to_string(id));
+        RefreshChats(); Connection(id);
+    });
+}
+void MainWindow::DraftLabel(const std::string& text) {
+    fDraftLabel->SetText(text.c_str());
+    if (text.empty() && !fDraftLabel->IsHidden()) fDraftLabel->Hide();
+    if (!text.empty() && fDraftLabel->IsHidden()) fDraftLabel->Show();
 }
 void MainWindow::RefreshChats() {
     if (!fReady || !fAccount) return;
@@ -323,7 +372,7 @@ void MainWindow::SelectChat(uint32 id) {
         fComposer->SetText(String(draft->second,"text").c_str());
         fAttachment = String(draft->second,"file"); fQuote = draft->second.value("quote",0u);
     }
-    fDraftLabel->SetText(fAttachment.empty() ? "" : fAttachment.c_str());
+    DraftLabel(fAttachment);
     SetComposeEnabled(false); RefreshMessages();
 }
 void MainWindow::RefreshMessages(bool older) {
@@ -375,7 +424,8 @@ void MainWindow::RefreshMessages(bool older) {
             if (bottom && !older && fMessages->CountItems()) fMessages->ScrollTo(0,std::max(0.0f,
                 fMessages->ItemFrame(fMessages->CountItems()-1).bottom - fMessages->Bounds().Height()));
             else if (anchorIndex >= 0) fMessages->ScrollTo(0,fMessages->ItemFrame(anchorIndex).top + offset);
-            MarkVisible();
+            if (++fConnectionTicks >= 20) { fConnectionTicks = 0; Connection(fAccount); }
+        MarkVisible();
             if (fRefreshAgain) { fRefreshAgain = false; RefreshMessages(); }
         });
     });
@@ -450,14 +500,17 @@ void MainWindow::Events() {
     },0);
 }
 void MainWindow::Connection(uint32 account) {
-    if (!account) return;
-    Call("get_connectivity",Json::array({account}),[this,account](const Json& c) {
-        if (c.is_number() && account == fAccount && !fSetupAccounts.count(account)) {
-            auto value = c.get<int>();
-            fStatus->SetText(value >= 4000 ? "Connected" : value >= 3000 ? "Working…"
-                : value >= 2000 ? "Connecting…" : "Offline · messages remain queued · Profile → Diagnostics");
+    if (!account || fDeletingAccounts.count(account) || !fConnectionPending.insert(account).second) return;
+    Call("get_connectivity_html",Json::array({account}),[this,account](const Json& html) {
+        fConnectionPending.erase(account);
+        if (fDeletingAccounts.count(account)) return;
+        std::string detail = html.is_string() ? DiagnosticText(ConnectivityText(html.get<std::string>()))
+            : "Connectivity query failed · see last RPC error below";
+        if (fConnectionDetails[account] != detail) {
+            fConnectionDetails[account] = detail;
+            Log("Connectivity profile=" + std::to_string(account) + "\n" + detail);
         }
-    });
+    },20);
 }
 void MainWindow::Send() {
     if (!fReady || !fCanSend || fSending || (!fComposer->TextLength() && fAttachment.empty())) return;
@@ -472,7 +525,7 @@ void MainWindow::Send() {
             fDrafts.erase({account,chat});
             if (generation == fGeneration) {
                 fComposer->SetText(""); fQuote = 0; fAttachment.clear(); SaveDraft();
-                fDraftLabel->SetText(""); fStatus->SetText("Message queued · waiting for server");
+                DraftLabel(""); fStatus->SetText("Message queued · waiting for server");
             }
         }
         SetComposeEnabled(fCanSend); RefreshChats(); if (generation == fGeneration) RefreshMessages();
@@ -566,17 +619,26 @@ void MainWindow::RemoveProfile(uint32 account) {
     alert->Go(new BInvoker(result,this));
 }
 void MainWindow::DeleteProfile(uint32 account) {
-    if (!account || fSetupAccounts.count(account)) return;
+    if (!account || fSetupAccounts.count(account) || !fDeletingAccounts.insert(account).second) return;
+    ++fAccountListRequest;
+    LoadAccounts(); fStatus->SetText("Deleting profile…");
     Call("remove_account",Json::array({account}),[this,account](const Json& result) {
-        if (!result.is_null()) return;
+        if (!result.is_null()) { fDeletingAccounts.erase(account); LoadAccounts(); return; }
+        ++fAccountListRequest;
+        if (fDesiredAccount == account) fDesiredAccount = 0;
         if (fAccount == account) {
             fAccount = fChat = fQuote = 0; ++fGeneration; ++fChatRequest;
             fRefreshing = fRefreshAgain = false; fAttachment.clear(); fComposer->SetText("");
-            fDraftLabel->SetText(""); Clear(fChats); Clear(fMessages); SetComposeEnabled(false);
+            DraftLabel(""); Clear(fChats); Clear(fMessages); SetComposeEnabled(false);
         }
         for (auto i = fDrafts.begin(); i != fDrafts.end();) {
             if (i->first.first == account) i = fDrafts.erase(i); else ++i;
         }
+        for (auto i = fSeen.begin(); i != fSeen.end();) {
+            if (i->first.first == account) i = fSeen.erase(i); else ++i;
+        }
+        fConnectionDetails.erase(account); fStartedAccounts.erase(account);
+        fDeletingAccounts.erase(account);
         WriteDrafts(); LoadAccounts(); fStatus->SetText("Profile deleted from this computer");
     });
 }
@@ -619,6 +681,7 @@ void MainWindow::MessageReceived(BMessage* message) try {
         if (response.contains("disconnected")) {
             fReady = false; SetComposeEnabled(false); ShowError(String(response,"disconnected")); return;
         }
+        if (response.contains("result")) fLastReply = system_time();
         uint64_t id = response.value("id",uint64_t(0));
         auto i = fCallbacks.find(id);
         if (i != fCallbacks.end()) {
@@ -640,12 +703,13 @@ void MainWindow::MessageReceived(BMessage* message) try {
             if (fDiagnosticsWindow.IsValid()) Diagnostics();
             fLogChanged = false;
         }
+        if (++fConnectionTicks >= 20) { fConnectionTicks = 0; Connection(fAccount); }
         MarkVisible();
         if (fEventRetryTicks > 0 && --fEventRetryTicks == 0) Events();
         break;
     }
     case 'dtls': if (message->GetInt32("which",0) == 1) Diagnostics(); break;
-    case 'diag': Diagnostics(); break;
+    case 'diag': Diagnostics(); Connection(fAccount); break;
     case 'rmcf': RemoveProfile(account); break;
     case 'rmac': if (message->GetInt32("which",0) == 1) DeleteProfile(account); break;
     case 'adir': {
@@ -653,7 +717,7 @@ void MainWindow::MessageReceived(BMessage* message) try {
         if (get_ref_for_path(fAccountsPath.c_str(), &ref) == B_OK) be_roster->Launch(&ref);
         break;
     }
-    case 'err!': ShowError(fLastError.empty() ? "No errors reported" : fLastError); break;
+    case 'err!': (new BAlert("Last error",fLastError.empty() ? "No errors reported" : fLastError.c_str(),"OK"))->Go(nullptr); break;
     case 'acct': SelectAccount(account); break;
     case 'srch': RefreshChats(); break;
     case 'chat': {
@@ -748,12 +812,12 @@ void MainWindow::MessageReceived(BMessage* message) try {
         if (message->FindRef("refs",&ref) == B_OK && BEntry(&ref,true).GetPath(&path) == B_OK) {
             BEntry entry(path.Path());
             if (!entry.IsFile()) { ShowError("Only regular files can be attached"); break; }
-            fAttachment = path.Path(); fDraftLabel->SetText(fAttachment.c_str()); SaveDraft();
+            fAttachment = path.Path(); DraftLabel(fAttachment); SaveDraft();
         }
         break;
     }
-    case 'clra': fAttachment.clear(); fQuote = 0; fDraftLabel->SetText(""); SaveDraft(); break;
-    case 'repl': if (selectedId && fCanSend) { fQuote = selectedId; fDraftLabel->SetText(("Replying to: " + String(selected,"text")).c_str()); fComposer->MakeFocus(); } break;
+    case 'clra': fAttachment.clear(); fQuote = 0; DraftLabel(""); SaveDraft(); break;
+    case 'repl': if (selectedId && fCanSend) { fQuote = selectedId; DraftLabel("Replying to: " + String(selected,"text")); fComposer->MakeFocus(); } break;
     case 'copy': if (selectedId) Copy(String(selected,"text")); break;
     case 'down':
         if (selectedId) Call("download_full_message",Json::array({fAccount,selectedId}),[this](const Json& result) {

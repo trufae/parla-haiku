@@ -10,6 +10,15 @@ concurrency:
   group: haiku-${{ github.ref }}
   cancel-in-progress: true
 jobs:
+  runtime:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Reproduce and fix Haiku poll backend lost wakeups
+        run: bash scripts/test-runtime.sh
   core:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
@@ -24,7 +33,7 @@ jobs:
         id: core-cache
         with:
           path: core-artifact
-          key: haiku-core64-${{ steps.core-source.outputs.revision }}-${{ hashFiles('.github/docker/x86.Dockerfile', 'scripts/build-core.sh', 'scripts/cross-x86_64-core.sh', 'scripts/patch-crates.py', 'patches/**') }}
+          key: haiku-core64-${{ steps.core-source.outputs.revision }}-${{ hashFiles('.github/docker/x86.Dockerfile', 'scripts/build-core.sh', 'scripts/cross-x86_64-core.sh', 'scripts/patch-crates.py', 'patches/**', 'tests/runtime/**') }}
       - name: Cross-build x86_64 Chatmail core
         if: steps.core-cache.outputs.cache-hit != 'true'
         run: |
@@ -35,7 +44,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: chatmail-haiku-x86_64-core
-          path: core-artifact/deltachat-rpc-server
+          path: core-artifact/*
           if-no-files-found: error
   haiku:
     needs: core
@@ -61,11 +70,13 @@ jobs:
             pkgman install -y cmake ninja git openssl3 python3.11
           run: |
             set -eu
-            chmod +x build/core/target/release/deltachat-rpc-server
+            chmod +x build/core/target/release/*
+            build/core/target/release/parla-runtime-probe
             cmake -S . -B build/gui -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo
             cmake --build build/gui -j4
             ctest --test-dir build/gui --output-on-failure
             python3.11 tests/core_smoke.py build/core/target/release/deltachat-rpc-server
+            python3.11 tests/core_network.py build/core/target/release/deltachat-rpc-server
             sh scripts/package.sh
             pkgman install -y "$PWD"/dist/*-x86_64.hpkg
             sh tests/gui_smoke.sh

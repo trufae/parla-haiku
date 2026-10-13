@@ -7,6 +7,9 @@
 #include <TranslatorRoster.h>
 #include <TranslatorFormats.h>
 #include <Button.h>
+#include <MenuBar.h>
+#include <MenuItem.h>
+#include <cmath>
 #include <Directory.h>
 #include <MessageRunner.h>
 #include <StringView.h>
@@ -105,7 +108,11 @@ public:
                 auto* send = dynamic_cast<BButton*>(fWindow->FindView("send"));
                 auto* composer = dynamic_cast<BTextView*>(fWindow->FindView("message"));
                 bool ready = send && send->IsEnabled();
-                if (ready) { CHECK(composer->Bounds().Height() < 65); composer->SetText("PRIVATE_MESSAGE_BODY"); CHECK(send->Invoke() == B_OK); }
+                if (ready) { CHECK(composer->Bounds().Height() < 40);
+                    auto* attach = fWindow->FindView("attach");
+                    CHECK(attach && fabsf(attach->Bounds().Width()-attach->Bounds().Height()) < 2);
+                    CHECK(attach->Bounds().Width() < 45);
+                    CHECK(fWindow->FindView("messageScroll")->Bounds().Height() > fWindow->Bounds().Height() * .65); composer->SetText("PRIVATE_MESSAGE_BODY"); CHECK(send->Invoke() == B_OK); }
                 fWindow->Unlock(); if (ready) ++fStage;
             } else if (fStage == 15) {
                 if (Status().find("SMTP fixture: connection refused") == std::string::npos) return;
@@ -122,6 +129,8 @@ public:
                     CHECK(log.find("fixture core: relay connection refused") != std::string::npos);
                     CHECK(log.find("send_msg") != std::string::npos);
                     CHECK(log.find("SMTP fixture: connection refused") != std::string::npos);
+                    CHECK(log.find("SMTP: retry <pending> & waiting") != std::string::npos);
+                    CHECK(log.find("HIDDEN_CSS") == std::string::npos);
                     CHECK(log.find("PRIVATE_MESSAGE_BODY") == std::string::npos);
                     CHECK(log.find("MUST_NOT_LOG_TRANSPORT_PASSWORD") == std::string::npos);
                     BBitmap* bitmap = nullptr;
@@ -135,7 +144,17 @@ public:
                 if (ConfirmDelete()) ++fStage;
             } else if (fStage == 18) {
                 if (!Has("remove_account",Json::array({9}))) return;
-                if (!Has("select_account",Json::array({7}))) return;
+                CHECK(fWindow->Lock());
+                auto* menu = dynamic_cast<BMenuBar*>(fWindow->FindView("menu"));
+                auto* profiles = menu->SubmenuAt(0)->SubmenuAt(4);
+                CHECK(profiles);
+                bool selected = false;
+                for (int32 i = 0; i < profiles->CountItems(); ++i) {
+                    auto* item = profiles->ItemAt(i);
+                    CHECK(item->Message()->GetUInt32("account",0) != 9);
+                    if (item->Message()->GetUInt32("account",0) == 7 && item->IsMarked()) selected = true;
+                }
+                fWindow->Unlock(); if (!selected) return;
                 status = 0; PostMessage(B_QUIT_REQUESTED);
             }
         } catch (const std::exception& e) { Fail(e.what()); }
