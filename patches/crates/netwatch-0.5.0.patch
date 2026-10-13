@@ -1,0 +1,70 @@
+--- a/src/interfaces.rs
++++ b/src/interfaces.rs
+@@ -335,6 +335,9 @@
+ }
+ 
+ impl HomeRouter {
++    #[cfg(target_os = "haiku")]
++    fn get_default_gateway() -> Option<IpAddr> { None }
++
+     /// Returns the likely IP of the residential router, which will always
+     /// be a private address, if found.
+     /// In addition, it returns the IP address of the current machine on
+@@ -408,3 +411,9 @@
+         assert!(is_usable_v6(&random_2603.into()));
+     }
+ }
++
++#[cfg(target_os = "haiku")]
++async fn default_route() -> Option<DefaultRouteDetails> {
++    let iface = netdev::get_default_interface().ok()?;
++    Some(DefaultRouteDetails { interface_name: iface.name })
++}
+--- a/src/netmon/actor.rs
++++ b/src/netmon/actor.rs
+@@ -1,3 +1,5 @@
++#[cfg(target_os = "haiku")]
++use super::haiku as os;
+ use std::{collections::HashMap, sync::Arc};
+ 
+ use n0_future::{
+--- /dev/null
++++ b/src/netmon/haiku.rs
+@@ -0,0 +1,26 @@
++//! Poll interface state on Haiku, where the BSD routing socket API is absent.
++use n0_future::task::{self, AbortOnDropHandle};
++use tokio::sync::mpsc;
++use super::actor::NetworkMessage;
++
++pub type Error = std::io::Error;
++
++#[derive(Debug)]
++pub(super) struct RouteMonitor {
++    _task: AbortOnDropHandle<()>,
++}
++impl RouteMonitor {
++    pub(super) fn new(sender: mpsc::Sender<NetworkMessage>) -> Result<Self, Error> {
++        let task = task::spawn(async move {
++            let mut timer = tokio::time::interval(std::time::Duration::from_secs(5));
++            loop {
++                timer.tick().await;
++                // The actor compares complete interface snapshots and suppresses
++                // callbacks when nothing changed. No route or address is invented.
++                if sender.send(NetworkMessage::Change).await.is_err() { break; }
++            }
++        });
++        Ok(Self { _task: AbortOnDropHandle::new(task) })
++    }
++}
++pub(super) fn is_interesting_interface(_name: &str) -> bool { true }
+--- a/src/netmon.rs
++++ b/src/netmon.rs
+@@ -9,6 +9,8 @@
+ use tokio::sync::{mpsc, oneshot};
+ 
+ mod actor;
++#[cfg(target_os = "haiku")]
++mod haiku;
+ #[cfg(target_os = "android")]
+ mod android;
+ #[cfg(any(

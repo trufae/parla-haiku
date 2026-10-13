@@ -67,3 +67,21 @@ than replacing protocol functionality with mocks or unencrypted shortcuts.
 
 Branding is provisional. Update `src/Branding.h` and `data/Parla.rdef` together;
 keep the settings folder ID stable to preserve existing profiles.
+
+## Network dependency patches
+
+The core's Iroh dependencies need explicit Haiku support in addition to the SSL
+build fix. `scripts/patch-crates.py` downloads the exact versions/checksums from
+upstream's lockfile, applies the small patches in `patches/crates`, and substitutes
+local paths without changing dependency versions. Cargo still uses `--locked`.
+
+- `iroh-quinn-udp`: select upstream's portable UDP implementation on Haiku, and
+  fix its send return type. UDP remains functional; ECN, packet batching and
+  segmentation offload are unavailable on this path.
+- `netdev`: enumerate IPv4/IPv6 interfaces with Haiku's `getifaddrs`, including
+  native address lengths and link flags.
+- `netwatch`: compare interface snapshots every five seconds instead of using
+  unsupported route sockets. Gateway discovery/automatic router port mapping
+  is unavailable; ordinary sockets and Iroh relays remain enabled.
+
+These patches do not alter TLS, certificate verification or message encryption.

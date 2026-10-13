@@ -1,0 +1,108 @@
+--- /dev/null
++++ b/src/interface/haiku.rs
+@@ -0,0 +1,74 @@
++//! Haiku interface enumeration via its native getifaddrs implementation.
++use super::Interface;
++use crate::ipnet::{Ipv4Net, Ipv6Net};
++use std::ffi::CStr;
++use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
++
++unsafe fn address(sa: *const libc::sockaddr) -> Option<IpAddr> {
++    if sa.is_null() { return None; }
++    match (*sa).sa_family as i32 {
++        libc::AF_INET if (*sa).sa_len as usize >= std::mem::size_of::<libc::sockaddr_in>() => {
++            let addr = &*(sa as *const libc::sockaddr_in);
++            Some(IpAddr::V4(Ipv4Addr::from(addr.sin_addr.s_addr.to_ne_bytes())))
++        }
++        libc::AF_INET6 if (*sa).sa_len as usize >= std::mem::size_of::<libc::sockaddr_in6>() => {
++            let addr = &*(sa as *const libc::sockaddr_in6);
++            Some(IpAddr::V6(Ipv6Addr::from(addr.sin6_addr.s6_addr)))
++        }
++        _ => None,
++    }
++}
++
++pub fn interfaces() -> Vec<Interface> {
++    let mut result: Vec<Interface> = Vec::new();
++    let mut head = std::ptr::null_mut();
++    unsafe {
++        if libc::getifaddrs(&mut head) != 0 { return result; }
++        let mut current = head;
++        while !current.is_null() {
++            let entry = &*current;
++            current = entry.ifa_next;
++            if entry.ifa_name.is_null() { continue; }
++            let name = CStr::from_ptr(entry.ifa_name).to_string_lossy().into_owned();
++            let index = match result.iter().position(|i| i.name == name) {
++                Some(index) => index,
++                None => {
++                    let mut iface = Interface::dummy();
++                    iface.index = libc::if_nametoindex(entry.ifa_name);
++                    iface.name = name;
++                    iface.flags = entry.ifa_flags as u32;
++                    result.push(iface);
++                    result.len() - 1
++                }
++            };
++            let iface = &mut result[index];
++            match (address(entry.ifa_addr), address(entry.ifa_netmask)) {
++                (Some(IpAddr::V4(ip)), mask) => {
++                    let prefix = if let Some(IpAddr::V4(mask)) = mask { u32::from(mask).count_ones() as u8 } else { 32 };
++                    if let Ok(net) = Ipv4Net::new(ip, prefix) { if !iface.ipv4.contains(&net) { iface.ipv4.push(net); } }
++                }
++                (Some(IpAddr::V6(ip)), mask) => {
++                    let prefix = if let Some(IpAddr::V6(mask)) = mask { u128::from(mask).count_ones() as u8 } else { 128 };
++                    if let Ok(net) = Ipv6Net::new(ip, prefix) { if !iface.ipv6.contains(&net) { iface.ipv6.push(net); } }
++                }
++                _ => {},
++            }
++        }
++        libc::freeifaddrs(head);
++    }
++    if let Some(local) = super::get_local_ipaddr() {
++        for iface in &mut result {
++            iface.default = iface.ipv4.iter().any(|ip| IpAddr::V4(ip.addr()) == local)
++                || iface.ipv6.iter().any(|ip| IpAddr::V6(ip.addr()) == local);
++        }
++    }
++    result
++}
++
++pub fn is_running(interface: &Interface) -> bool {
++    interface.flags & libc::IFF_LINK as u32 != 0 || interface.is_loopback()
++}
++
++pub fn is_physical_interface(interface: &Interface) -> bool {
++    interface.is_up() && is_running(interface) && !interface.is_loopback() && !interface.is_tun()
++}
+--- a/src/interface/mod.rs
++++ b/src/interface/mod.rs
+@@ -1,3 +1,8 @@
++#[cfg(target_os = "haiku")]
++mod haiku;
++#[cfg(target_os = "haiku")]
++use self::haiku::*;
++
+ mod shared;
+ pub use self::shared::*;
+ 
+--- a/src/sys/unix.rs
++++ b/src/sys/unix.rs
+@@ -10,7 +10,7 @@
+ pub const AF_INET: libc::c_int = libc::AF_INET;
+ pub const AF_INET6: libc::c_int = libc::AF_INET6;
+ 
+-pub use libc::{IFF_BROADCAST, IFF_LOOPBACK, IFF_MULTICAST, IFF_POINTOPOINT, IFF_RUNNING, IFF_UP};
++pub use libc::{IFF_BROADCAST, IFF_LOOPBACK, IFF_MULTICAST, IFF_POINTOPOINT, IFF_UP};
+ 
+ fn ntohs(u: u16) -> u16 {
+     u16::from_be(u)
+@@ -60,3 +60,8 @@
+ pub fn ipv4_addr_int(addr: InAddr) -> u32 {
+     (addr.s_addr as u32).to_be()
+ }
++
++#[cfg(not(target_os = "haiku"))]
++pub use libc::IFF_RUNNING;
++#[cfg(target_os = "haiku")]
++pub use libc::IFF_LINK as IFF_RUNNING;

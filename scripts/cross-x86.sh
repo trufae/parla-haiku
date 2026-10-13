@@ -18,7 +18,7 @@ export CORE_RUST_TOOLCHAIN=nightly-2026-10-01
 export RUSTFLAGS='-C link-arg=-lnetwork'
 
 # OpenSSL's Haiku configuration works with the target compiler. Build it explicitly
-# because openssl-src's Rust target dispatch has no Haiku entry. No TLS weakening.
+# with assembly disabled, as in HaikuPorts' x86 recipe. No TLS weakening.
 openssl="$BUILD_DIR/openssl-src"
 if [ ! -d "$openssl/.git" ]; then
     git clone --depth 1 --branch openssl-3.5.9 https://github.com/openssl/openssl.git "$openssl"

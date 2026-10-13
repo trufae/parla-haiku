@@ -1,0 +1,35 @@
+--- a/src/fallback.rs
++++ b/src/fallback.rs
+@@ -96,7 +96,7 @@
+     socket.0.send_to(
+         transmit.contents,
+         &socket2::SockAddr::from(transmit.destination),
+-    )
++    ).map(|_| ())
+ }
+ 
+ pub(crate) const BATCH_SIZE: usize = 1;
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -38,10 +38,10 @@
+     time::{Duration, Instant},
+ };
+ 
+-#[cfg(any(unix, windows))]
++#[cfg(any(all(unix, not(target_os = "haiku")), windows))]
+ mod cmsg;
+ 
+-#[cfg(unix)]
++#[cfg(all(unix, not(target_os = "haiku")))]
+ #[path = "unix.rs"]
+ mod imp;
+ 
+@@ -50,7 +50,7 @@
+ mod imp;
+ 
+ // No ECN support
+-#[cfg(not(any(wasm_browser, unix, windows)))]
++#[cfg(any(target_os = "haiku", not(any(wasm_browser, unix, windows))))]
+ #[path = "fallback.rs"]
+ mod imp;
+ 

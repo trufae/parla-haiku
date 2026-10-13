@@ -8,6 +8,7 @@ git -c safe.directory="$root/subprojects/chatmail-core" -C "$root/subprojects/ch
 for patch in "$root"/patches/*.patch; do
     patch -d "$build/core" -p1 < "$patch"
 done
+${PYTHON:-python3} "$root/scripts/patch-crates.py" "$build/core"
 cd "$build/core"
 if [ "$(uname -s)" = Haiku ]; then
     export OPENSSL_NO_VENDOR=1
