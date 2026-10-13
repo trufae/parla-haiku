@@ -1,6 +1,7 @@
 # The compiler/sysroot are Haiku's official r1beta5 hybrid x86 toolchain.
 # Use a current host userland for the independently pinned resource/hpkg tools.
-FROM ghcr.io/haiku/cross-compiler:x86_gcc2h-r1beta5@sha256:f7b1ff813795c133d9f1c6a71df97aaa0e36a0a7107a02be8b277871d82cee07 AS toolchain
+ARG HAIKU_IMAGE=ghcr.io/haiku/cross-compiler:x86_gcc2h-r1beta5@sha256:f7b1ff813795c133d9f1c6a71df97aaa0e36a0a7107a02be8b277871d82cee07
+FROM ${HAIKU_IMAGE} AS toolchain
 FROM ubuntu:24.04
 COPY --from=toolchain /tools /tools
 COPY --from=toolchain /system /system

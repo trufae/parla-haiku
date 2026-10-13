@@ -1,3 +1,4 @@
 /build*/
 /dist/
 *.hpkg
+/core-artifact/

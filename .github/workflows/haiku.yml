@@ -1,6 +1,7 @@
 name: Haiku
 on:
   push:
+    paths-ignore: ["README.md", "docs/**"]
   pull_request:
   workflow_dispatch:
 permissions:
@@ -9,30 +10,52 @@ concurrency:
   group: haiku-${{ github.ref }}
   cancel-in-progress: true
 jobs:
-  haiku:
+  core:
     runs-on: ubuntu-24.04
-    timeout-minutes: 120
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
+      - name: Cross-build x86_64 Chatmail core
+        run: |
+          docker build -f .github/docker/x86.Dockerfile \
+            --build-arg HAIKU_IMAGE=ghcr.io/haiku/cross-compiler:x86_64-r1beta5 \
+            -t parla-haiku-core64 .github/docker
+          docker run --rm -v "$PWD:/work" -w /work parla-haiku-core64 bash scripts/cross-x86_64-core.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: chatmail-haiku-x86_64-core
+          path: core-artifact/deltachat-rpc-server
+          if-no-files-found: error
+  haiku:
+    needs: core
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: actions/download-artifact@v4
+        with:
+          name: chatmail-haiku-x86_64-core
+          path: build/core/target/release
       - name: Build and test native Haiku package
         uses: vmactions/haiku-vm@7e21b66d11ab20b9cf9a76331a9d18a4ce264527
         with:
           release: r1beta6
           arch: x86_64
-          mem: 8192
+          mem: 4096
           cpu: 4
           prepare: |
             set -eu
-            pkgman install -y rust_bin cmake ninja git openssl3_devel pkgconfig python3.11 llvm21_lld llvm21_clang
+            pkgman install -y cmake ninja git openssl3 python3.11
           run: |
             set -eu
-            rustc --version
+            chmod +x build/core/target/release/deltachat-rpc-server
             cmake -S . -B build/gui -G Ninja -DCMAKE_BUILD_TYPE=Release
             cmake --build build/gui -j4
             ctest --test-dir build/gui --output-on-failure
-            RUSTFLAGS="-C linker=clang -C link-arg=-fuse-ld=lld" PYTHON=python3.11 sh scripts/build-core.sh
             python3.11 tests/core_smoke.py build/core/target/release/deltachat-rpc-server
             sh scripts/package.sh
             sh tests/gui_smoke.sh
