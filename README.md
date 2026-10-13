@@ -29,9 +29,10 @@ message if the status line has changed. Profile setup and transfer show progress
 
 ## Packages and architectures
 
-Download the [0.1.1 preview](https://github.com/trufae/parla-haiku/releases/tag/v0.1.1)
+Download the [0.1.2 preview](https://github.com/trufae/parla-haiku/releases/tag/v0.1.2)
 for both 64-bit and 32-bit packages, with checksums and test notes. This fixes
-the empty native dialogs in 0.1.0 and makes core errors visible. The original `parla-0.1.0-1-x86.hpkg` had incorrect
+the account-creation abort in 0.1.1, preserves selected-account defaults, and
+adds **Deskbar → Applications → Parla**. The original `parla-0.1.0-1-x86.hpkg` had incorrect
 architecture metadata and cannot be installed on standard hybrid Haiku.
 
 The [Actions workflows](https://github.com/trufae/parla-haiku/actions) produce:
@@ -42,7 +43,7 @@ The [Actions workflows](https://github.com/trufae/parla-haiku/actions) produce:
 | `x86` (32-bit) | Linux cross-compiler, Haiku hybrid ABI, modern GCC | `parla-haiku-x86` |
 
 Download an artifact from a **successful** run, unzip it, and open the `.hpkg`
-in Haiku to install it. The application is added to Deskbar. The 32-bit build
+in Haiku to install it. The application is added to **Deskbar → Applications → Parla**. The 32-bit build
 uses the modern `x86` secondary ABI; it is not a GCC 2 / BeOS binary.
 Its package is named `parla_x86` and declares `architecture x86_gcc2`, matching
 the host OS. The `haiku_x86` dependency supplies its secondary ABI runtime.
@@ -61,16 +62,18 @@ cd parla-haiku
 mkdir -p build/core/target/release
 # Place the cross-built deltachat-rpc-server in that directory.
 chmod +x build/core/target/release/deltachat-rpc-server
-cmake -S . -B build/gui -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake -S . -B build/gui -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo
 cmake --build build/gui -j4
 ctest --test-dir build/gui --output-on-failure
 python3.11 tests/core_smoke.py build/core/target/release/deltachat-rpc-server
 sh scripts/package.sh
+pkgman install -y "$PWD"/dist/*-x86_64.hpkg
 sh tests/gui_smoke.sh
 ```
 
 Packages go into `dist/`. Development launches can set `PARLA_RPC_SERVER` to
-the built server path. Normal installed launches find the server beside the GUI.
+the built server path. `PARLA_SETTINGS_PATH` and `DC_ACCOUNTS_PATH` can isolate
+settings and accounts for tests. Normal installed launches find the server beside the GUI.
 Settings and profiles live in `~/config/settings/Parla`; do not delete that
 folder without exporting a backup.
 
@@ -98,7 +101,12 @@ See [docs/PORTING.md](docs/PORTING.md) for details and limitations.
 
 The portable transport tests also run on Linux using ordinary CMake/CTest.
 The core integration test uses temporary offline profiles and does not provision
-accounts or send mail. The native CI additionally checks the GUI/core handshake.
+accounts or send mail. Native tests submit the actual New profile, Link another
+device, Existing email and Profile settings forms to an offline RPC fixture,
+check selected-account defaults and error recovery, and load malformed drafts.
+CI installs the hpkg, validates its Applications shortcut, and launches the
+installed GUI through that shortcut with its bundled real core. Release GUI
+binaries include debug information for useful Haiku Debugger backtraces.
 Webxdc, voice/video, inline media and other remaining parity work are listed
 in the porting document. Branding can change independently of the protocol.
 
