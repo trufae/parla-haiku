@@ -16,7 +16,7 @@ for i in $(seq 1 30); do
         # Haiku's screenshot main() returns BApplication::Run(), a thread ID,
         # rather than a POSIX success status. Check the saved image instead.
         screenshot -s "$root/dist/parla-native.png" || true
-        test -s "$root/dist/parla-native.png"
+        python3.11 -c 'import sys; assert open(sys.argv[1], "rb").read(8) == b"\x89PNG\r\n\x1a\n"' "$root/dist/parla-native.png"
         captured=true
     fi
     sleep 1

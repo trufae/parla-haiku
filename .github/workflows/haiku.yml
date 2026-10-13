@@ -17,11 +17,14 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
+      - name: Identify pinned core source
+        id: core-source
+        run: echo "revision=$(git -C subprojects/chatmail-core rev-parse HEAD)" >> "$GITHUB_OUTPUT"
       - uses: actions/cache@v4
         id: core-cache
         with:
           path: core-artifact
-          key: haiku-core64-${{ hashFiles('.gitmodules', '.github/docker/x86.Dockerfile', 'scripts/build-core.sh', 'scripts/cross-x86_64-core.sh', 'scripts/patch-crates.py', 'patches/**', 'subprojects/chatmail-core/Cargo.lock', 'subprojects/chatmail-core/Cargo.toml') }}-2.63.0
+          key: haiku-core64-${{ steps.core-source.outputs.revision }}-${{ hashFiles('.github/docker/x86.Dockerfile', 'scripts/build-core.sh', 'scripts/cross-x86_64-core.sh', 'scripts/patch-crates.py', 'patches/**') }}
       - name: Cross-build x86_64 Chatmail core
         if: steps.core-cache.outputs.cache-hit != 'true'
         run: |
