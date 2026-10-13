@@ -4,6 +4,15 @@ The device logs show `send_msg` returning a message ID in 7 ms. Later, local
 `get_message_ids` and `get_full_chat_by_id` calls all time out. SMTP rejection
 alone does not explain these local requests becoming unresponsive.
 
+The native TCP probe exposed another platform bug: Mio's `new_socket()` omitted
+Haiku from both the atomic `SOCK_NONBLOCK` branch and the fallback `fcntl`
+branch. TCP listeners, clients and UDP sockets were therefore blocking. A read,
+connect or accept could occupy an executor worker indefinitely. The patch adds
+Haiku to the nonblocking/close-on-exec fallback and explicitly makes accepted
+streams nonblocking too. The probe checks descriptor flags before running
+concurrent traffic; forcing the poll backend on Linux alone cannot detect a
+missing Haiku-specific socket configuration.
+
 Mio 1.2.0 uses the portable poll selector and pipe waker on Haiku. Its
 `modify_fds()` drained the shared pipe after registration, reregistration and
 removal. A user/runtime wake token could still be pending after that drain.

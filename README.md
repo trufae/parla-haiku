@@ -42,10 +42,12 @@ timestamps and delivery states appear in a smaller footer.
 
 ## Packages and architectures
 
-Download the [0.1.4 preview](https://github.com/trufae/parla-haiku/releases/tag/v0.1.4)
+Download the [0.1.5 preview](https://github.com/trufae/parla-haiku/releases/tag/v0.1.5)
 for both 64-bit and 32-bit packages, with checksums and test notes. It adds
-profile recovery/deletion and diagnostics for stalled sends, plus a compact
-native chat interface. The 32-bit crypto fix and
+fixes for blocking network sockets and lost Rust runtime wakeups, reliable
+profile switching/deletion,
+separate SMTP diagnostics, and a shorter composer with distinct bubble colors.
+The 32-bit crypto fix and
 **Deskbar → Applications → Parla** entry remain included. The original `parla-0.1.0-1-x86.hpkg` had incorrect
 architecture metadata and cannot be installed on standard hybrid Haiku.
 
@@ -80,6 +82,7 @@ cmake -S . -B build/gui -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo
 cmake --build build/gui -j4
 ctest --test-dir build/gui --output-on-failure
 python3.11 tests/core_smoke.py build/core/target/release/deltachat-rpc-server
+python3.11 tests/core_network.py build/core/target/release/deltachat-rpc-server
 sh scripts/package.sh
 pkgman install -y "$PWD"/dist/*-x86_64.hpkg
 sh tests/gui_smoke.sh
@@ -114,8 +117,10 @@ Small, checksum-verified crate patches add Haiku networking support for Iroh.
 See [docs/PORTING.md](docs/PORTING.md) for details and limitations.
 
 The portable transport tests also run on Linux using ordinary CMake/CTest.
-The core integration test uses temporary offline profiles and does not provision
-accounts or send mail. Native tests submit the actual New profile, Link another
+The offline core integration test uses temporary unconfigured profiles. A separate
+loopback IMAP/SMTP test verifies encrypted delivery, temporary rejection and
+retry, scheduler stop/start and deleting an active profile. It uses local dummy
+credentials and sends nothing to external recipients. Native tests submit the actual New profile, Link another
 device, Existing email and Profile settings forms to an offline RPC fixture,
 check selected-account defaults and error recovery, and load malformed drafts.
 CI installs the hpkg, validates its Applications shortcut, and launches the
@@ -130,3 +135,8 @@ in the porting document. Branding can change independently of the protocol.
 
 GPL-3.0-or-later for the client; Chatmail core is MPL-2.0. Third-party dependency
 licenses remain applicable.
+
+The 0.1.5 investigation and regression coverage are documented in
+[Haiku runtime wakeups](docs/runtime-wakeup.md). Diagnostics now includes
+separate incoming and outgoing connectivity, because receiving successfully
+does not establish that SMTP sending works.
