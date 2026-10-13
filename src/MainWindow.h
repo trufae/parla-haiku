@@ -49,8 +49,12 @@ private:
     uint64_t fGeneration = 0, fChatRequest = 0, fMessageRequest = 0;
     bool fReady = false, fCanSend = false, fSending = false, fRefreshing = false, fRefreshAgain = false;
     bool fSmokeTest = false, fArchived = false;
+    bool fEventsPending = false;
+    int fEventRetryTicks = 0;
     size_t fLimit = 100;
     std::string fAttachment, fSettings;
+    std::string fLastError;
+    BMessenger fErrorAlert;
     std::map<std::pair<uint32,uint32>, Json> fDrafts;
     std::map<std::pair<uint32,uint32>, std::string> fSeen;
 };

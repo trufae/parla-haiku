@@ -68,10 +68,12 @@ jobs:
             python3.11 tests/core_smoke.py build/core/target/release/deltachat-rpc-server
             sh scripts/package.sh
             sh tests/gui_smoke.sh
+            cp build/gui/forms-native.png dist/parla-forms.png
       - uses: actions/upload-artifact@v4
         with:
           name: parla-haiku-x86_64
           path: |
             dist/*.hpkg
             dist/parla-native.png
+            dist/parla-forms.png
           if-no-files-found: error

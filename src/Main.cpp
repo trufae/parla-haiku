@@ -8,7 +8,7 @@ public:
     ParlaApplication(bool smoke) : BApplication(kAppSignature), fSmoke(smoke) {}
     void ReadyToRun() override { (new MainWindow(fSmoke))->Show(); }
     void AboutRequested() override {
-        (new BAlert("About", "Parla for Haiku 0.1.0\n\nNative messaging with Chatmail core.\nCompatible with Delta Chat.\n\nGNU GPL version 3 or later.\nChatmail core: Mozilla Public License 2.0.\nName and artwork are provisional.", "OK"))->Go(nullptr);
+        (new BAlert("About", "Parla for Haiku 0.1.1\n\nNative messaging with Chatmail core.\nCompatible with Delta Chat.\n\nGNU GPL version 3 or later.\nChatmail core: Mozilla Public License 2.0.\nName and artwork are provisional.", "OK"))->Go(nullptr);
     }
 private: bool fSmoke;
 };

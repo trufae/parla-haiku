@@ -7,7 +7,7 @@ int main() {
         auto request = Json::parse(line);
         std::string method = request.at("method");
         if (method == "hang") continue;
-        if (method == "die") return 0;
+        if (method == "die") { std::cerr << "core failure diagnostic\n" << std::flush; return 1; }
         if (method == "bad") { std::cout << "{broken\n" << std::flush; continue; }
         if (method == "noisy") {
             std::string noise(256 * 1024, 'x');

@@ -77,6 +77,7 @@ MainWindow::MainWindow(bool smokeTest)
     MenuItem(profile,"Import backup…",'impt'); MenuItem(profile,"Export backup…",'expt');
     profile->AddSeparatorItem();
     MenuItem(profile,"About Parla…",B_ABOUT_REQUESTED)->SetTarget(be_app);
+    MenuItem(profile,"Last error…",'err!');
     MenuItem(profile,"Quit",B_QUIT_REQUESTED,'Q');
     auto* editMenu = new BMenu("Edit"); menu->AddItem(editMenu);
     MenuItem(editMenu,"Cut",B_CUT,'X'); MenuItem(editMenu,"Copy",B_COPY,'C');
@@ -134,7 +135,15 @@ MainWindow::MainWindow(bool smokeTest)
     PostMessage('boot');
 }
 MainWindow::~MainWindow() { fPulse.reset(); fRpc.Stop(); Clear(fChats); Clear(fMessages); }
-void MainWindow::ShowError(const std::string& text) { fStatus->SetText(text.c_str()); }
+void MainWindow::ShowError(const std::string& text) {
+    fLastError = text; fStatus->SetText(text.c_str());
+    fprintf(stderr, "Parla: %s\n", text.c_str());
+    // Keep full diagnostics visible without stacking alerts for pending RPCs.
+    if (!fErrorAlert.IsValid()) {
+        auto* alert = new BAlert("Parla error", text.c_str(), "OK");
+        fErrorAlert = BMessenger(alert); alert->Go(nullptr);
+    }
+}
 void MainWindow::Call(const char* method, Json params, Callback callback, int timeout) {
     try {
         uint64_t id = fRpc.Call(method,params,timeout);
@@ -158,7 +167,8 @@ void MainWindow::Start() {
     try {
         BMessenger target(this);
         fRpc.Start(executable,accounts,[target](const Json& response) {
-            BMessage message(kRPC); message.AddString("json",response.dump().c_str());
+            BMessage message(kRPC);
+            message.AddString("json",response.dump(-1, ' ', false, Json::error_handler_t::replace).c_str());
             target.SendMessage(&message,static_cast<BHandler*>(nullptr),1000000);
         });
         Call("get_system_info",Json::array(),[this](const Json& result) {
@@ -312,7 +322,7 @@ void MainWindow::RefreshMessages(bool older) {
     });
 }
 void MainWindow::MarkVisible() {
-    if (!IsActive() || IsMinimized() || !fAccount || !fChat) return;
+    if (!fReady || !IsActive() || IsMinimized() || !fAccount || !fChat) return;
     Json ids = Json::array(); BRect bounds = fMessages->Bounds();
     for (int32 i = 0; i < fMessages->CountItems(); ++i) {
         auto* item = static_cast<MessageItem*>(fMessages->ItemAt(i));
@@ -330,9 +340,11 @@ void MainWindow::MarkVisible() {
     });
 }
 void MainWindow::Events() {
-    if (!fReady) return;
+    if (!fReady || fEventsPending) return;
+    fEventsPending = true;
     Call("get_next_event_batch",Json::array(),[this](const Json& events) {
-        if (!events.is_array()) return;
+        fEventsPending = false;
+        if (!events.is_array()) { fEventRetryTicks = 10; return; }
         bool chats = false, messages = false;
         for (const auto& event : events) {
             auto data = event.value("event",Json::object());
@@ -345,6 +357,14 @@ void MainWindow::Events() {
             }
             if (account != fAccount) continue;
             if (kind == "Error") ShowError(String(data,"msg"));
+            if (kind == "ConfigureProgress" || kind == "ImexProgress") {
+                int progress = data.value("progress", 0);
+                std::string text = kind == "ImexProgress" ? "Transferring profile: " : "Configuring profile: ";
+                text += std::to_string(progress / 10) + "%";
+                std::string comment = String(data, "comment");
+                if (!comment.empty()) text += " · " + comment;
+                fStatus->SetText(text.c_str());
+            }
             if (kind == "MsgsChanged" || kind == "IncomingMsg" || kind == "MsgsNoticed" || kind == "ChatlistChanged"
                 || kind == "ChatlistItemChanged" || kind == "ChatModified") chats = true;
             if (kind == "MsgsChanged" || kind == "IncomingMsg" || kind == "MsgDelivered" || kind == "MsgRead"
@@ -390,10 +410,15 @@ void MainWindow::CreateProfile(const BMessage& message) {
     std::string name = Field(message,"field0"), credential = Field(message,"field1"), secret = Field(message,"field2");
     if (name.empty()) { ShowError("Enter a display name"); return; }
     uint32 action = message.what;
+    if ((action == 'crml' || action == 'crlk') && credential.empty()) {
+        ShowError(action == 'crml' ? "Enter an email address" : "Enter a second-device setup code"); return;
+    }
     fStatus->SetText("Creating profile…");
     Call("add_account",Json::array(),[this,name,credential,secret,action](const Json& result) {
         if (!result.is_number()) return;
         uint32 id = result.get<uint32>();
+        // Select before configuration so its errors and progress are received.
+        SelectAccount(id); LoadAccounts();
         auto done = [this,id](const Json& result) {
             if (result.is_object() && result.contains("_rpcError")) { LoadAccounts(); return; }
             Call("is_configured",Json::array({id}),[this,id](const Json& configured) {
@@ -432,6 +457,10 @@ bool MainWindow::QuitRequested() {
     be_app->PostMessage(B_QUIT_REQUESTED); return true;
 }
 void MainWindow::MessageReceived(BMessage* message) {
+    if (!fReady && (message->what == 'prof' || message->what == 'mail' || message->what == 'link')) {
+        ShowError(fLastError.empty() ? "Chatmail is not connected yet. If startup failed, restart Parla to reconnect." : fLastError);
+        return;
+    }
     uint32 account = fAccount, chat = fChat, msgid = 0;
     message->FindUInt32("account",&account); message->FindUInt32("chat",&chat); message->FindUInt32("message",&msgid);
     auto selected = SelectedMessage();
@@ -455,7 +484,11 @@ void MainWindow::MessageReceived(BMessage* message) {
         }
         break;
     }
-    case 'tick': MarkVisible(); break;
+    case 'tick':
+        MarkVisible();
+        if (fEventRetryTicks > 0 && --fEventRetryTicks == 0) Events();
+        break;
+    case 'err!': ShowError(fLastError.empty() ? "No errors reported" : fLastError); break;
     case 'acct': SelectAccount(account); break;
     case 'srch': RefreshChats(); break;
     case 'chat': {
@@ -485,7 +518,8 @@ void MainWindow::MessageReceived(BMessage* message) {
         break;
     case 'svst':
         if (!account) break;
-        Call("set_config",Json::array({account,"displayname",Field(*message,"field0")}),[this,account](const Json&) {
+        Call("set_config",Json::array({account,"displayname",Field(*message,"field0")}),[this,account](const Json& result) {
+            if (!result.is_null()) return;
             Call("is_configured",Json::array({account}),[this,account](const Json& c) {
                 if (c == false) Call("configure",Json::array({account}),[this](const Json&){ LoadAccounts(); },300);
                 else LoadAccounts();

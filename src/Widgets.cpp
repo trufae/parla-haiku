@@ -146,7 +146,9 @@ FormWindow::FormWindow(const char* title, const char* explanation, std::vector<F
     auto* ok = new BButton("ok", action, new BMessage(kFormOK));
     layout.AddGroup(B_HORIZONTAL).AddGlue()
         .Add(new BButton("cancel", "Cancel", new BMessage(B_QUIT_REQUESTED))).Add(ok).End();
-    AddChild(body); SetDefaultButton(ok); CenterOnScreen();
+    // The window needs a layout too; AddChild alone leaves body at zero size.
+    BLayoutBuilder::Group<>(this, B_VERTICAL, 0).Add(body);
+    SetDefaultButton(ok); CenterOnScreen();
     if (!fFields.empty()) fFields[0]->MakeFocus();
     Show();
 }

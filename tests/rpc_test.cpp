@@ -29,7 +29,11 @@ int main(int argc, char** argv) {
         for (int i=0; i<30; ++i) ids.push_back(rpc.Call("echo", Json::array({i})));
         for (int i=0; i<30; ++i) CHECK(wait(ids[i])["result"][0] == i);
         auto dying = rpc.Call("die", Json::array());
-        CHECK(wait(dying).contains("error")); CHECK(wait(longPoll).contains("error"));
+        auto failure = wait(dying);
+        CHECK(failure.contains("error")); CHECK(wait(longPoll).contains("error"));
+        auto diagnostic = failure["error"]["message"].get<std::string>();
+        CHECK(diagnostic.find("core failure diagnostic") != std::string::npos);
+        CHECK(diagnostic.size() < 4300);
         rpc.Stop(); rpc.Start(argv[1], "/tmp/restart", receiver);
         CHECK(wait(rpc.Call("bad", Json::array())).contains("error"));
         rpc.Stop();

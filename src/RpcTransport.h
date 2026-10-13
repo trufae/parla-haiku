@@ -28,7 +28,7 @@ private:
     std::thread fThread;
     std::atomic<bool> fStop{true};
     std::mutex fMutex;
-    std::string fOutput;
+    std::string fOutput, fDiagnostics;
     struct Pending { std::chrono::steady_clock::time_point deadline; };
     std::map<uint64_t, Pending> fPending;
     uint64_t fNextId = 0;

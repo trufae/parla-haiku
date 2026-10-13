@@ -24,6 +24,7 @@ Json Error(uint64_t id, const std::string& text) {
 RpcTransport::~RpcTransport() { Stop(); }
 void RpcTransport::Start(const std::string& executable, const std::string& accounts, Receiver receiver) {
     Stop();
+    fDiagnostics.clear();
     signal(SIGPIPE, SIG_IGN);
     int in[2] = {-1,-1}, out[2] = {-1,-1}, err[2] = {-1,-1};
     try {
@@ -79,8 +80,10 @@ void RpcTransport::Fail(const std::string& reason) {
         fStop = true;
         pending.swap(fPending); fOutput.clear();
     }
-    for (const auto& p : pending) fReceiver(Error(p.first, reason));
-    fReceiver(Json{{"disconnected", reason}});
+    std::string detail = reason;
+    if (!fDiagnostics.empty()) detail += "\n\nChatmail stderr (last 4 KiB):\n" + fDiagnostics;
+    for (const auto& p : pending) fReceiver(Error(p.first, detail));
+    fReceiver(Json{{"disconnected", detail}});
 }
 void RpcTransport::Run() {
     std::string buffer;
@@ -98,6 +101,10 @@ void RpcTransport::Run() {
         // Drain stderr independently: a full logging pipe must never block RPC.
         if (p[1].revents) {
             ssize_t n = read(fError, bytes, sizeof bytes);
+            if (n > 0) {
+                fDiagnostics.append(bytes, static_cast<size_t>(n));
+                if (fDiagnostics.size() > 4096) fDiagnostics.erase(0, fDiagnostics.size() - 4096);
+            }
             if (n == 0) Close(fError);
         }
         if (p[3].revents & POLLOUT) {
