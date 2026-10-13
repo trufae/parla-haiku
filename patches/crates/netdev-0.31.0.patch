@@ -86,6 +86,31 @@
  mod shared;
  pub use self::shared::*;
  
+--- a/src/interface/types.rs
++++ b/src/interface/types.rs
+@@ -70,6 +70,22 @@
+ }
+ 
+ impl InterfaceType {
++    /// Values from Haiku's net/if_types.h (IANA interface types).
++    #[cfg(target_os = "haiku")]
++    pub fn value(&self) -> u32 {
++        match self {
++            Self::Unknown => 0x01,
++            Self::Ethernet => 0x06,
++            Self::Ppp => 0x17,
++            Self::Loopback => 0x18,
++            Self::Slip => 0x1c,
++            Self::GenericModem => 0x30,
++            Self::Tunnel => 0x83,
++            Self::Bridge => 0xd1,
++            _ => u32::MAX,
++        }
++    }
++
+     /// Returns OS-specific value of InterfaceType
+     #[cfg(target_os = "windows")]
+     pub fn value(&self) -> u32 {
 --- a/src/sys/unix.rs
 +++ b/src/sys/unix.rs
 @@ -10,7 +10,7 @@
