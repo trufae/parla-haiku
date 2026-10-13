@@ -139,8 +139,10 @@ FormWindow::FormWindow(const char* title, const char* explanation, std::vector<F
     auto layout = BLayoutBuilder::Group<>(body, B_VERTICAL, B_USE_DEFAULT_SPACING).SetInsets(B_USE_WINDOW_SPACING);
     layout.Add(new BStringView("explanation", explanation));
     for (const auto& field : fields) {
-        auto* control = new BTextControl("field", field.label, field.value.c_str(), nullptr);
+        auto* control = new BTextControl("field", field.label, "", nullptr);
+        // HideTyping(true) clears existing text in Haiku's BTextView.
         control->TextView()->HideTyping(field.secret);
+        control->SetText(field.value.c_str());
         layout.Add(control); fFields.push_back(control);
     }
     auto* ok = new BButton("ok", action, new BMessage(kFormOK));

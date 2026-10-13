@@ -45,7 +45,9 @@ public:
                     std::vector<BTextControl*> fields;
                     for (int32 i = 0; i < fWindow->CountChildren(); ++i) Fields(fWindow->ChildAt(i), fields);
                     CHECK(fields.size() == fExpected.size());
-                    for (auto* field : fields) {
+                    for (size_t i = 0; i < fields.size(); ++i) {
+                        auto* field = fields[i];
+                        CHECK(field->TextView()->IsTypingHidden() == fExpected[i].secret);
                         CHECK(!field->IsHidden());
                         CHECK(field->Bounds().Width() > 100 && field->Bounds().Height() > 10);
                         CHECK(fWindow->Frame().Contains(field->ConvertToScreen(field->Bounds())));
