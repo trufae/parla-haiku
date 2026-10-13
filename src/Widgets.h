@@ -62,10 +62,10 @@ private:
 };
 class DiagnosticsWindow : public BWindow {
 public:
-    explicit DiagnosticsWindow(const std::string& text);
+    DiagnosticsWindow(const std::string& summary, const std::string& text);
     void MessageReceived(BMessage* message) override;
 private:
-    BTextView* fText;
+    BTextView *fText, *fSummary;
     bool fPaused = false;
 };
 class ProfileWindow : public BWindow {

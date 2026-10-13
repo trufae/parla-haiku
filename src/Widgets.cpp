@@ -211,30 +211,37 @@ void ChatItem::DrawItem(BView* owner, BRect rect, bool) {
     small.TruncateString(&preview,B_TRUNCATE_END,std::max(20.0f,rect.Width() - 62));
     owner->DrawString(preview.String(),BPoint(rect.left + 53,rect.top + 42)); owner->SetFont(&font);
 }
-DiagnosticsWindow::DiagnosticsWindow(const std::string& text)
+DiagnosticsWindow::DiagnosticsWindow(const std::string& summary, const std::string& text)
     : BWindow(BRect(30,40,820,580),"Parla diagnostics",B_TITLED_WINDOW,B_AUTO_UPDATE_SIZE_LIMITS | B_CLOSE_ON_ESCAPE) {
+    fSummary = new BTextView("diagnosticSummary", B_WILL_DRAW | B_NAVIGABLE);
+    fSummary->MakeEditable(false); fSummary->SetWordWrap(true); fSummary->SetText(summary.c_str());
+    fSummary->SetExplicitMinSize(BSize(400,130)); fSummary->SetExplicitMaxSize(BSize(B_SIZE_UNLIMITED,160));
     fText = new BTextView("diagnostics", B_WILL_DRAW | B_NAVIGABLE);
     fText->MakeEditable(false); fText->SetWordWrap(true); fText->SetText(text.c_str());
     fText->SetExplicitMinSize(BSize(400,220));
     auto* scroll = new BScrollView("logs",fText,0,false,true);
     BLayoutBuilder::Group<>(this,B_VERTICAL).SetInsets(B_USE_WINDOW_SPACING)
+        .Add(new BScrollView("summary",fSummary,0,false,true))
         .Add(new BStringView("help","RPC results, core events and server stderr · newest entries below"))
         .Add(scroll,1).AddGroup(B_HORIZONTAL)
             .Add(new BCheckBox("pause","Pause updates",new BMessage('paus')))
             .AddGlue().Add(new BButton("copy","Copy all",new BMessage('copy')))
             .Add(new BButton("close","Close",new BMessage(B_QUIT_REQUESTED))).End();
-    Show(); fText->ScrollToOffset(fText->TextLength());
+    Show(); PostMessage('tail');
 }
 void DiagnosticsWindow::MessageReceived(BMessage* message) {
-    if (message->what == 'logs') {
+    if (message->what == 'tail') fText->ScrollToOffset(fText->TextLength());
+    else if (message->what == 'logs') {
         const char* text;
         if (!fPaused && message->FindString("text",&text) == B_OK) {
             fText->SetText(text); fText->ScrollToOffset(fText->TextLength());
+            if (message->FindString("summary",&text) == B_OK) fSummary->SetText(text);
         }
     } else if (message->what == 'paus') fPaused = !fPaused;
     else if (message->what == 'copy') {
         if (be_clipboard->Lock()) {
-            be_clipboard->Clear(); be_clipboard->Data()->AddData("text/plain",B_MIME_TYPE,fText->Text(),fText->TextLength());
+            std::string report = std::string(fSummary->Text()) + "\n\n" + fText->Text();
+            be_clipboard->Clear(); be_clipboard->Data()->AddData("text/plain",B_MIME_TYPE,report.data(),report.size());
             be_clipboard->Commit(); be_clipboard->Unlock();
         }
     } else BWindow::MessageReceived(message);

@@ -30,10 +30,12 @@ private:
     void SaveDraft();
     void ShowError(const std::string& error);
     void Log(const std::string& text);
+    std::string DiagnosticText(const std::string& text) const;
     void Diagnostics();
     void ProfileSettings(uint32 account);
     void Connection(uint32 account);
     void RemoveProfile(uint32 account);
+    void DeleteProfile(uint32 account);
     void WriteDrafts();
     void Form(const char* title, const char* help, std::vector<FormField> fields, uint32 what, const char* action = "OK", uint32 retryAccount = 0);
     void CreateProfile(const BMessage& message);

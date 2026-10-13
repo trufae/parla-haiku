@@ -146,7 +146,8 @@ MainWindow::MainWindow(bool smokeTest)
     PostMessage('boot');
 }
 MainWindow::~MainWindow() { fPulse.reset(); fRpc.Stop(); Clear(fChats); Clear(fMessages); }
-void MainWindow::ShowError(const std::string& text) {
+void MainWindow::ShowError(const std::string& error) {
+    std::string text = DiagnosticText(error);
     fLastError = text; fStatus->SetText(text.c_str()); Log("ERROR " + text);
     fprintf(stderr, "Parla: %s\n", text.c_str());
     // Keep full diagnostics visible without stacking alerts for pending RPCs.
@@ -155,14 +156,17 @@ void MainWindow::ShowError(const std::string& text) {
         fErrorAlert = BMessenger(alert); alert->Go(new BInvoker(new BMessage('dtls'),this));
     }
 }
-void MainWindow::Log(const std::string& text) {
+std::string MainWindow::DiagnosticText(const std::string& text) const {
     std::string safe = text;
     for (const auto& secret : fSecrets) if (!secret.empty()) {
         size_t pos = 0;
         while ((pos = safe.find(secret, pos)) != std::string::npos) { safe.replace(pos, secret.size(), "[redacted]"); pos += 10; }
     }
     // Normalize invalid UTF-8 from stderr before handing it to native text views.
-    safe = Json::parse(Json(safe).dump(-1, ' ', false, Json::error_handler_t::replace)).get<std::string>();
+    return Json::parse(Json(safe).dump(-1, ' ', false, Json::error_handler_t::replace)).get<std::string>();
+}
+void MainWindow::Log(const std::string& text) {
+    std::string safe = DiagnosticText(text);
     time_t now = time(nullptr); tm local{}; localtime_r(&now, &local);
     char stamp[32]; strftime(stamp, sizeof stamp, "%H:%M:%S", &local);
     fLog += std::string(stamp) + " " + safe + "\n";
@@ -175,9 +179,9 @@ void MainWindow::Log(const std::string& text) {
 void MainWindow::Diagnostics() {
     std::string text = fStartup + "\nActive profile: " + std::to_string(fAccount)
         + (fReady ? " · RPC connected\n" : " · RPC disconnected\n")
-        + "Last error: " + (fLastError.empty() ? "none" : fLastError) + "\n\n" + fLog;
-    if (!fDiagnosticsWindow.IsValid()) fDiagnosticsWindow = BMessenger(new DiagnosticsWindow(text));
-    else { BMessage update('logs'); update.AddString("text", text.c_str()); fDiagnosticsWindow.SendMessage(&update); }
+        + "Last error: " + (fLastError.empty() ? "none" : fLastError);
+    if (!fDiagnosticsWindow.IsValid()) fDiagnosticsWindow = BMessenger(new DiagnosticsWindow(text, fLog));
+    else { BMessage update('logs'); update.AddString("summary",text.c_str()); update.AddString("text",fLog.c_str()); fDiagnosticsWindow.SendMessage(&update); }
 }
 void MainWindow::Call(const char* method, Json params, Callback callback, int timeout) {
     std::string operation(method);
@@ -214,6 +218,8 @@ void MainWindow::Start() {
     fStartup = std::string("Parla ") + kAppVersion + " · " + std::to_string(sizeof(void*) * 8) + "-bit\nAccounts: " + accounts
         + "\nServer: " + executable + "\nTLS CA: "
         + (getenv("SSL_CERT_FILE") ? getenv("SSL_CERT_FILE") : "/boot/system/data/ssl/CARootCertificates.pem");
+    fStartup += "\nLog: " + fSettings + "/diagnostics.log";
+    rename((fSettings + "/diagnostics.log").c_str(),(fSettings + "/diagnostics.previous.log").c_str());
     Log(fStartup);
     create_directory(accounts.c_str(),0700); chmod(accounts.c_str(),0700);
     try {
@@ -478,7 +484,8 @@ Json MainWindow::SelectedMessage() const {
 }
 void MainWindow::Form(const char* title, const char* help, std::vector<FormField> fields, uint32 what, const char* action, uint32 retryAccount) {
     BMessage message(what);
-    if (retryAccount) message.AddUInt32("retryAccount", retryAccount); message.AddUInt32("account",fAccount); message.AddUInt32("chat",fChat);
+    if (retryAccount) message.AddUInt32("retryAccount", retryAccount);
+    message.AddUInt32("account",fAccount); message.AddUInt32("chat",fChat);
     message.AddUInt32("message",SelectedMessage().value("id",0u));
     new FormWindow(title,help,std::move(fields),BMessenger(this),message,action);
 }
@@ -555,7 +562,11 @@ void MainWindow::RemoveProfile(uint32 account) {
     auto* alert = new BAlert("Delete profile", ("Permanently delete profile " + std::to_string(account)
         + " and its messages and attachments from this computer? Other devices are unaffected.\n\nFolder: "
         + fAccountsPath).c_str(), "Cancel", "Delete", nullptr, B_WIDTH_AS_USUAL, B_WARNING_ALERT);
-    if (alert->Go() != 1) return;
+    auto* result = new BMessage('rmac'); result->AddUInt32("account",account);
+    alert->Go(new BInvoker(result,this));
+}
+void MainWindow::DeleteProfile(uint32 account) {
+    if (!account || fSetupAccounts.count(account)) return;
     Call("remove_account",Json::array({account}),[this,account](const Json& result) {
         if (!result.is_null()) return;
         if (fAccount == account) {
@@ -620,6 +631,12 @@ void MainWindow::MessageReceived(BMessage* message) try {
         auto output = fRpc.TakeDiagnostics();
         if (!output.empty()) Log("Server stderr: " + output);
         if (fLogChanged) {
+            // Keep a bounded report after closing Parla; retain the previous run.
+            std::string path = fSettings + "/diagnostics.log";
+            BFile log(path.c_str(),B_WRITE_ONLY | B_CREATE_FILE | B_ERASE_FILE);
+            chmod(path.c_str(),0600);
+            std::string report = fStartup + "\nLast error: " + fLastError + "\n\n" + fLog;
+            log.Write(report.data(),report.size());
             if (fDiagnosticsWindow.IsValid()) Diagnostics();
             fLogChanged = false;
         }
@@ -630,6 +647,7 @@ void MainWindow::MessageReceived(BMessage* message) try {
     case 'dtls': if (message->GetInt32("which",0) == 1) Diagnostics(); break;
     case 'diag': Diagnostics(); break;
     case 'rmcf': RemoveProfile(account); break;
+    case 'rmac': if (message->GetInt32("which",0) == 1) DeleteProfile(account); break;
     case 'adir': {
         entry_ref ref;
         if (get_ref_for_path(fAccountsPath.c_str(), &ref) == B_OK) be_roster->Launch(&ref);
