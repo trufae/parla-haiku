@@ -513,8 +513,11 @@ void MainWindow::MessageReceived(BMessage* message) {
         break;
     case 'crpr': case 'crml': case 'crlk': CreateProfile(*message); break;
     case 'sett':
-        if (fAccount) Form("Profile settings","Update your name, or retry incomplete profile setup.",
-            {{"Display name:",""}},'svst',"Save / retry setup");
+        if (fAccount) Call("get_config",Json::array({fAccount,"displayname"}),[this,account](const Json& name) {
+            if (account == fAccount && name.is_string())
+                Form("Profile settings","Update your name, or retry incomplete profile setup.",
+                    {{"Display name:",name.get<std::string>()}},'svst',"Save / retry setup");
+        });
         break;
     case 'svst':
         if (!account) break;
@@ -642,7 +645,9 @@ void MainWindow::MessageReceived(BMessage* message) {
         std::string path = Field(*message,"field0"), pass = Field(*message,"field1");
         Call("add_account",Json::array(),[this,path,pass](const Json& id) {
             if (!id.is_number()) return;
-            Call("import_backup",Json::array({id,path,pass}),[this,id](const Json&) {
+            SelectAccount(id.get<uint32>()); LoadAccounts();
+            Call("import_backup",Json::array({id,path,pass}),[this,id](const Json& result) {
+                if (!result.is_null()) { LoadAccounts(); return; }
                 LoadAccounts(); Call("is_configured",Json::array({id}),[this,id](const Json& c) {
                     if (c == true) { SelectAccount(id.get<uint32>()); Call("start_io",Json::array({id})); }
                 });
