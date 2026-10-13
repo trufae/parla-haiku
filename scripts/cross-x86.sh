@@ -1,5 +1,5 @@
 #!/bin/bash
-# Run inside ghcr.io/haiku/cross-compiler:x86_gcc2h-r1beta5.
+# Run inside the image defined in .github/docker/x86.Dockerfile.
 set -euo pipefail
 root=$(cd "$(dirname "$0")/.." && pwd)
 export BUILD_DIR="$root/build-x86"
@@ -46,6 +46,9 @@ unzip -o -q "$tools.zip" -d "$tools"
 chmod +x "$tools/rc" "$tools/xres" "$tools/package"
 export LD_LIBRARY_PATH="$tools${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 export PATH="$tools:$PATH"
+# This pinned hosttools build embeds its build-time system-data path. The writer
+# requires that directory to exist even when every license is bundled in hpkg.
+mkdir -p /home/runner/work/haiku-toolchains-ubuntu/haiku-toolchains-ubuntu/haiku/data/system/data
 cmake -S "$root" -B "$BUILD_DIR/gui" -G Ninja \
     -DCMAKE_SYSTEM_NAME=Haiku -DCMAKE_SYSTEM_PROCESSOR=x86 \
     -DCMAKE_CXX_COMPILER=/tools/cross-tools-x86/bin/i586-pc-haiku-g++ \

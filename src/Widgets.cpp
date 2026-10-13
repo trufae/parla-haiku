@@ -4,6 +4,7 @@
 #include <MenuItem.h>
 #include <PopUpMenu.h>
 #include <StringView.h>
+#include <ScrollBar.h>
 #include <ctime>
 #include <sstream>
 #include <algorithm>
@@ -66,6 +67,11 @@ void MessageItem::Update(BView* owner, const BFont* font) {
     text += body;
     if (!String(data, "fileName").empty()) text += "\n[Attachment: " + String(data, "fileName") + "]";
     if (!String(data, "error").empty()) text += "\n" + String(data, "error");
+    if (data.contains("reactions") && data["reactions"].is_object()) {
+        auto reactions = data["reactions"].value("reactions", Json::array());
+        if (reactions.is_array()) for (const auto& reaction : reactions)
+            text += "\n" + String(reaction, "emoji") + "  " + std::to_string(reaction.value("count", 0u));
+    }
     fLines.clear();
     std::istringstream input(text); std::string paragraph;
     while (std::getline(input, paragraph)) {
@@ -98,6 +104,11 @@ void MessageList::FrameResized(float width, float height) {
     BListView::FrameResized(width, height);
     BFont font; GetFont(&font);
     for (int32 i = 0; i < CountItems(); ++i) ItemAt(i)->Update(this, &font);
+    if (auto* bar = ScrollBar(B_VERTICAL)) {
+        float total = CountItems() ? ItemFrame(CountItems() - 1).bottom + 1 : 0;
+        bar->SetRange(0, std::max(0.0f, total - height));
+        bar->SetProportion(total > 0 ? std::min(1.0f, height / total) : 1.0f);
+    }
     Invalidate();
 }
 void MessageList::MouseDown(BPoint point) {

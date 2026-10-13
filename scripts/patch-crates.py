@@ -4,6 +4,7 @@ import hashlib
 import io
 import pathlib
 import re
+import shutil
 import subprocess
 import sys
 import tarfile
@@ -29,6 +30,9 @@ for patch in sorted((root / 'patches/crates').glob('*.patch')):
         raise SystemExit(f'{name}: crate checksum mismatch')
     vendor = core / 'haiku-crates'
     vendor.mkdir(exist_ok=True)
+    destination = vendor / patch.stem
+    if destination.exists():
+        shutil.rmtree(destination)
     with tarfile.open(fileobj=io.BytesIO(data), mode='r:gz') as archive:
         # Every crate member must remain under its one expected directory.
         for member in archive.getmembers():
@@ -36,8 +40,8 @@ for patch in sorted((root / 'patches/crates').glob('*.patch')):
             if (path.is_absolute() or '..' in path.parts or path.parts[0] != patch.stem
                     or not (member.isfile() or member.isdir())):
                 raise SystemExit(f'{name}: unsafe archive member')
-        archive.extractall(vendor)
-    subprocess.run(['patch', '-d', str(vendor / patch.stem), '-p1', '-i', str(patch)], check=True)
+        archive.extractall(vendor, filter="data")
+    subprocess.run(['patch', '--batch', '-d', str(vendor / patch.stem), '-p1', '-i', str(patch)], check=True)
     patches.append(f'{name} = {{ path = "haiku-crates/{patch.stem}" }}')
     # A path override removes only source/checksum, never resolves newer versions.
     lock = lock[:match.start()] + f'name = "{name}"\nversion = "{version}"\n' + lock[match.end():]

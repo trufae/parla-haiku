@@ -138,7 +138,7 @@ void MainWindow::Call(const char* method, Json params, Callback callback, int ti
         fCallbacks[id] = [this,callback](const Json& response) {
             if (response.contains("error")) {
                 ShowError(String(response["error"],"message","Chatmail operation failed"));
-                // Every callback receives null on failure so operation state can be released.
+                // Distinguish errors from successful void RPC responses (JSON null).
                 if (callback) callback(Json{{"_rpcError", true}});
             } else if (callback) callback(response.value("result",Json()));
         };
@@ -256,7 +256,7 @@ void MainWindow::RefreshMessages(bool older) {
     uint64_t generation = fGeneration, request = ++fMessageRequest;
     uint32 account = fAccount, chat = fChat;
     Call("get_full_chat_by_id",Json::array({account,chat}),[this,generation](const Json& data) {
-        if (generation != fGeneration || !data.is_object()) return;
+        if (generation != fGeneration || !data.is_object() || data.contains("_rpcError")) return;
         fTitle->SetText((String(data,"name") + (data.value("isEncrypted",false) ? "" : " · unencrypted email")).c_str());
         SetComposeEnabled(data.value("canSend",false));
         bool request = data.value("isContactRequest",false);
@@ -272,7 +272,7 @@ void MainWindow::RefreshMessages(bool older) {
         Call("get_messages",Json::array({account,ids}),[this,generation,request,ids,older](const Json& objects) {
             if (generation != fGeneration || request != fMessageRequest) return;
             fRefreshing = false;
-            if (!objects.is_object()) return;
+            if (!objects.is_object() || objects.contains("_rpcError")) return;
             BRect bounds = fMessages->Bounds();
             float lastBottom = fMessages->CountItems() ? fMessages->ItemFrame(fMessages->CountItems()-1).bottom : 0;
             bool bottom = bounds.bottom >= lastBottom - 10;

@@ -8,8 +8,16 @@ stage="$build/package-root"
 mkdir -p "$stage" "$root/dist"
 DESTDIR="$stage" cmake --install "$build/gui" --prefix /boot/system
 payload="$stage/boot/system"
-mkdir -p "$payload/data/deskbar/menu" "$payload/documentation/packages/parla"
+mkdir -p "$payload/data/deskbar/menu" "$payload/documentation/packages/parla" "$payload/data/licenses"
+cp "$root/COPYING" "$payload/data/licenses/GNU GPL v3"
+cp "$root/subprojects/chatmail-core/LICENSE" "$payload/data/licenses/MPL v2.0"
+cp "$root/data/nlohmann-LICENSE" "$payload/data/licenses/MIT"
+cp "$root/data/Apache-2.0" "$payload/data/licenses/Apache v2"
 ln -sf ../../../apps/Parla/Parla "$payload/data/deskbar/menu/Parla"
+# OpenSSL is linked statically in the x86 cross-build; ship its notice as well.
+if [ -f "$build/openssl-src/LICENSE.txt" ]; then
+    cp "$build/openssl-src/LICENSE.txt" "$payload/documentation/packages/parla/OpenSSL-Apache-2.0"
+fi
 cp "$root/subprojects/chatmail-core/LICENSE" "$payload/documentation/packages/parla/Chatmail-MPL-2.0"
 cat > "$payload/.PackageInfo" <<INFO
 name parla
@@ -20,12 +28,16 @@ description "A native Haiku Interface Kit messaging client with bundled Chatmail
 packager "Parla contributors"
 vendor "Parla contributors"
 copyrights "2026 Parla contributors"
-licenses "GNU GPL v3" "MPL v2.0" "MIT"
+licenses {
+    "GNU GPL v3"
+    "MPL v2.0"
+    "MIT"
+    "Apache v2"
+}
 provides { parla = 0.1.0 }
 requires {
     haiku$([ "$arch" = x86 ] && printf _x86 || true)
-    lib:libssl$([ "$arch" = x86 ] && printf _x86 || true) >= 3
-    lib:libcrypto$([ "$arch" = x86 ] && printf _x86 || true) >= 3
+$([ "$arch" = x86_64 ] && printf '    lib:libssl >= 3\n    lib:libcrypto >= 3' || true)
     ca_root_certificates
 }
 INFO
