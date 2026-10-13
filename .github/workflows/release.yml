@@ -1,0 +1,23 @@
+name: Publish tested preview
+on:
+  push:
+    branches: [main]
+    paths: ["docs/releases/publish.json"]
+  workflow_dispatch:
+permissions:
+  actions: read
+  contents: write
+concurrency:
+  group: publish-preview
+  cancel-in-progress: false
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify builds and publish their packages
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: python3 scripts/publish-release.py
