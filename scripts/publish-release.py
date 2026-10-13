@@ -26,7 +26,17 @@ for arch, workflow in (("x86", ".github/workflows/haiku-x86.yml"),
     run_id = int(manifest["runs"][arch])
     run = json.loads(gh("api", f"repos/{repository}/actions/runs/{run_id}"))
     assert run["conclusion"] == "success", f"{arch}: build did not pass"
-    assert run["head_sha"] == revision, f"{arch}: wrong source revision"
+    build_revision = run["head_sha"]
+    # Test/CI-only fixes need not rebuild the other architecture. Verify every
+    # application, dependency, resource and build-script input is unchanged.
+    subprocess.run(["git", "diff", "--exit-code", build_revision, revision, "--",
+                    ".", ":(exclude)docs/**", ":(exclude)README.md",
+                    ":(exclude)tests/**", ":(exclude).github/workflows/**",
+                    ":(exclude)scripts/publish-release.py"], check=True)
+    subprocess.run(["git", "diff", "--exit-code", build_revision, revision,
+                    "--", workflow], check=True)
+    if arch == "x86_64":
+        assert build_revision == revision, "Native tests must pass at the release revision"
     assert run["path"] == workflow, f"{arch}: wrong workflow"
     assert run["head_repository"]["full_name"] == repository
     assert run["event"] in ("push", "workflow_dispatch")
