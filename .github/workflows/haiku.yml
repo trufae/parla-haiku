@@ -25,7 +25,7 @@ jobs:
           cpu: 4
           prepare: |
             set -eu
-            pkgman install -y rust_bin cmake ninja git openssl_devel pkgconfig python3
+            pkgman install -y rust_bin cmake ninja git openssl_devel pkgconfig python311
           run: |
             set -eu
             rustc --version
