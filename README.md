@@ -29,10 +29,10 @@ message if the status line has changed. Profile setup and transfer show progress
 
 ## Packages and architectures
 
-Download the [0.1.2 preview](https://github.com/trufae/parla-haiku/releases/tag/v0.1.2)
+Download the [0.1.3 preview](https://github.com/trufae/parla-haiku/releases/tag/v0.1.3)
 for both 64-bit and 32-bit packages, with checksums and test notes. This fixes
-the account-creation abort in 0.1.1, preserves selected-account defaults, and
-adds **Deskbar → Applications → Parla**. The original `parla-0.1.0-1-x86.hpkg` had incorrect
+the 32-bit RPC server's P-256 stack-alignment crash. It also includes the
+account-form fixes and **Deskbar → Applications → Parla** entry from 0.1.2. The original `parla-0.1.0-1-x86.hpkg` had incorrect
 architecture metadata and cannot be installed on standard hybrid Haiku.
 
 The [Actions workflows](https://github.com/trufae/parla-haiku/actions) produce:
@@ -106,7 +106,11 @@ device, Existing email and Profile settings forms to an offline RPC fixture,
 check selected-account defaults and error recovery, and load malformed drafts.
 CI installs the hpkg, validates its Applications shortcut, and launches the
 installed GUI through that shortcut with its bundled real core. Release GUI
-binaries include debug information for useful Haiku Debugger backtraces.
+and core binaries include debug information for useful Haiku Debugger backtraces.
+The 32-bit CI also executes the built server's P-256 arithmetic under qemu-i386
+at every permitted stack alignment, checking its results against known values.
+This exercises the actual crypto machine code without provisioning accounts;
+it does not replace a complete 32-bit Haiku runtime test.
 Webxdc, voice/video, inline media and other remaining parity work are listed
 in the porting document. Branding can change independently of the protocol.
 

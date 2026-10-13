@@ -49,8 +49,9 @@ network I/O. Offline send failure is expected without a configured transport.
 
 The x86_64 workflow additionally launches the native window and verifies a
 successful handshake with the bundled core. The x86 cross-build checks that
-both executables are ELF32 before packaging. A 32-bit Haiku runtime test is
-still required separately; a Linux cross-link is not proof of runtime behavior.
+both executables are ELF32 before packaging, then executes the server's actual
+P-256 multiplication/squaring code at all four 4-byte stack alignments under
+qemu-i386. A complete 32-bit Haiku runtime test is still required separately.
 
 Live relay provisioning, cross-device delivery/read receipts, backup restore,
 and secure-join must be exercised on Haiku with another Delta Chat client before
@@ -100,3 +101,35 @@ included in the x86_64 artifact for visual inspection.
 The cross-built core links pinned OpenSSL 3.5.9 statically on both architectures.
 The native `build-core.sh` path selects the system OpenSSL development package
 for developers investigating/updating the native Rust toolchain.
+
+## 32-bit crypto stack ABI (0.1.3)
+
+The 0.1.2 RPC server's device backtrace stopped at image offset `0xfee921`:
+`movaps %xmm7,-0x148(%ebp)`, inside ring 0.17.13's `fiat_p256_mul`.
+Its caller at `0xff5529` is `p256_mul_mont`; return address `0xff5553`
+matches the next frame. Compiling the pinned C source with Haiku GCC 13.3
+reproduces the function's instruction sequence.
+
+Haiku's 32-bit calling convention permits 4-byte stack alignment. The Rust
+caller uses that convention, but ring enables `-msse2` on its C compilation
+without stack realignment. GCC's generated aligned SIMD spills can fault when
+those C functions are entered from Rust. This is independent of the installed
+CPU supporting SSE2; removing OpenSSL assembly alone does not fix it.
+
+`patches/crates/ring-0.17.13.patch` enables `-mstackrealign` only for Haiku x86.
+This preserves the native ABI and cryptographic algorithms. It applies to all
+ring C code, covering squaring and other functions with the same requirement.
+No TLS or certificate checks are disabled. The core now retains symbols and
+line tables instead of stripping all names from device backtraces.
+
+`tests/x86_stack_alignment.py` reconstructs the ELF load image and calls its
+OS-independent P-256 entry points from a minimal Linux syscall harness. It
+checks multiplication and squaring against a modular-arithmetic oracle for
+stack offsets 0, 4, 8 and 12. No Haiku syscalls, dynamic-loader behavior or
+network operations are emulated by this test. The release workflow runs it
+against the newly built 32-bit server, not a separately compiled test version.
+
+A hash-checked negative control is available with `--legacy-0.1.2` on the
+server extracted from `parla_x86-0.1.2-2-x86_gcc2.hpkg`. Both entry points in that
+binary pass at offset 0 and reproduce SIGSEGV at offsets 4, 8 and 12. The patched
+C source passes all eight cases with correct results using the same compiler.
