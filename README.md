@@ -24,15 +24,29 @@ Use **Profile → New profile** to create an identity, then exchange invitation
 links with another Delta Chat user using **Copy my invitation** and
 **Chat → Join invitation**. Enter sends; Shift+Enter inserts a newline.
 Attachments open with their native associated application after confirmation.
-Errors appear in a native alert; **Profile → Last error** retains the full
-message if the status line has changed. Profile setup and transfer show progress.
+Errors appear in a native alert. **Profile → Diagnostics** shows RPC methods,
+request IDs, timings, core events and live server stderr. Pause updates to take a
+photo, or copy the report. Bounded `diagnostics.log` and `diagnostics.previous.log`
+files are kept in Parla's settings directory. RPC passwords, setup codes and
+message bodies are not dumped; core logs can include account/server metadata.
+
+**Profile settings** shows relay addresses and setup status, with separate
+Chatmail/email/device-transfer recovery actions. **Delete this profile** removes
+its local database and attachments after confirmation. **Open accounts folder**
+opens the actual directory in Tracker. By default it is
+`/boot/home/config/settings/Parla/accounts`; Parla passes this explicitly to the
+server as `DC_ACCOUNTS_PATH`. An explicit environment override is respected.
+
+The composer is compact, the chat list displays avatars and previews, and message
+timestamps and delivery states appear in a smaller footer.
 
 ## Packages and architectures
 
-Download the [0.1.3 preview](https://github.com/trufae/parla-haiku/releases/tag/v0.1.3)
-for both 64-bit and 32-bit packages, with checksums and test notes. This fixes
-the 32-bit RPC server's P-256 stack-alignment crash. It also includes the
-account-form fixes and **Deskbar → Applications → Parla** entry from 0.1.2. The original `parla-0.1.0-1-x86.hpkg` had incorrect
+Download the [0.1.4 preview](https://github.com/trufae/parla-haiku/releases/tag/v0.1.4)
+for both 64-bit and 32-bit packages, with checksums and test notes. It adds
+profile recovery/deletion and diagnostics for stalled sends, plus a compact
+native chat interface. The 32-bit crypto fix and
+**Deskbar → Applications → Parla** entry remain included. The original `parla-0.1.0-1-x86.hpkg` had incorrect
 architecture metadata and cannot be installed on standard hybrid Haiku.
 
 The [Actions workflows](https://github.com/trufae/parla-haiku/actions) produce:
