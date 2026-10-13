@@ -1,7 +1,7 @@
 name: Haiku x86 (32-bit)
 on:
   push:
-    paths-ignore: ["README.md", "docs/**", ".github/workflows/haiku.yml"]
+    paths-ignore: ["README.md", "docs/**", ".github/workflows/haiku.yml", "tests/core_network.py", "tests/accounts_test.cpp", "tests/account_rpc.cpp"]
   pull_request:
   workflow_dispatch:
 permissions:

@@ -72,7 +72,7 @@ def main():
         for listener in (smtp,imap): threading.Thread(target=listener.serve_forever,daemon=True).start()
         stderr = open(os.path.join(directory,'stderr.log'),'w+')
         core = subprocess.Popen([os.path.abspath(sys.argv[1])],stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=stderr,text=True,
-            env={**os.environ,'DC_ACCOUNTS_PATH':directory})
+            env={**os.environ,'DC_ACCOUNTS_PATH':os.path.join(directory,'accounts')})
         replies = queue.Queue()
         def reader():
             for line in core.stdout: replies.put(json.loads(line))
@@ -87,12 +87,17 @@ def main():
             return reply.get('result')
         try:
             account = call('add_account')
-            call('add_or_update_transport',account,dict(addr='parla@example.invalid',password='loopback-only',
+            transport = dict(addr='parla@example.invalid',password='loopback-only',
                 imapServer='127.0.0.1',imapPort=imap.server_address[1],imapSecurity='plain',imapUser='parla',
-                smtpServer='127.0.0.1',smtpPort=smtp.server_address[1],smtpSecurity='plain',smtpUser='parla'))
+                smtpServer='127.0.0.1',smtpPort=smtp.server_address[1],smtpSecurity='plain',smtpUser='parla')
+            call('add_or_update_transport',account,transport)
             assert call('is_configured',account)
             call('start_io',account)
-            contact = call('create_contact',account,'recipient@example.invalid','Recipient')
+            other = call('add_account')
+            call('add_or_update_transport',other,{**transport,'addr':'recipient@example.invalid'})
+            card = call('make_vcard',other,[1])
+            contact = call('import_vcard_contents',account,card)[0]
+            assert call('lookup_contact_id_by_addr',account,'recipient@example.invalid') == contact
             chat = call('create_chat_by_contact_id',account,contact)
             for number in range(3):
                 message = call('send_msg',account,chat,dict(text=f'Parla SMTP test {number}'))
@@ -121,7 +126,6 @@ def main():
                 assert time.monotonic()<deadline, 'Queued message did not recover'
                 time.sleep(.05)
             # Deleting an active scheduler must release it and leave other profiles usable.
-            other = call('add_account')
             call('remove_account',account)
             call('select_account',other)
             assert [a['id'] for a in call('get_all_accounts')] == [other]

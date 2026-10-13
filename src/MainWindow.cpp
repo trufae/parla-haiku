@@ -764,11 +764,17 @@ void MainWindow::MessageReceived(BMessage* message) try {
     case 'mkch': {
         std::string name = Field(*message,"field0"), addr = Field(*message,"field1");
         if (addr.empty()) { ShowError("Enter an email address"); break; }
-        Call("create_contact",Json::array({account,addr,name}),[this,account](const Json& id) {
+        auto openChat = [this,account](const Json& id) {
             if (!id.is_number()) return;
             Call("create_chat_by_contact_id",Json::array({account,id}),[this,account](const Json& chat) {
                 if (account == fAccount && chat.is_number()) { SelectChat(chat.get<uint32>()); RefreshChats(); }
             });
+        };
+        // create_contact always creates an unencrypted address-contact. Preserve
+        // an existing key-contact when starting a chat from its email address.
+        Call("lookup_contact_id_by_addr",Json::array({account,addr}),[this,account,addr,name,openChat](const Json& id) {
+            if (id.is_number()) openChat(id);
+            else if (id.is_null()) Call("create_contact",Json::array({account,addr,name}),openChat);
         }); break;
     }
     case 'newg': if (fAccount) Form("New group","Create a group, then share its invitation or add members.",{{"Group name:",""}},'mkgr',"Create"); break;
