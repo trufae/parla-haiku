@@ -27,8 +27,10 @@ Attachments open with their native associated application after confirmation.
 
 ## Packages and architectures
 
-Download the [0.1.0 preview release](https://github.com/trufae/parla-haiku/releases/tag/v0.1.0)
-for ready-to-install **64-bit and 32-bit `.hpkg` packages**, checksums and test notes.
+Download the [64-bit preview](https://github.com/trufae/parla-haiku/releases/tag/v0.1.0)
+or the [corrected 32-bit package](https://github.com/trufae/parla-haiku/releases/tag/v0.1.0-2),
+with checksums and test notes. The original `parla-0.1.0-1-x86.hpkg` had incorrect
+architecture metadata and cannot be installed on standard hybrid Haiku.
 
 The [Actions workflows](https://github.com/trufae/parla-haiku/actions) produce:
 
@@ -40,6 +42,8 @@ The [Actions workflows](https://github.com/trufae/parla-haiku/actions) produce:
 Download an artifact from a **successful** run, unzip it, and open the `.hpkg`
 in Haiku to install it. The application is added to Deskbar. The 32-bit build
 uses the modern `x86` secondary ABI; it is not a GCC 2 / BeOS binary.
+Its package is named `parla_x86` and declares `architecture x86_gcc2`, matching
+the host OS. The `haiku_x86` dependency supplies its secondary ABI runtime.
 Cross-compilation alone does not verify execution on a 32-bit Haiku system.
 
 ## Build the GUI on 64-bit Haiku

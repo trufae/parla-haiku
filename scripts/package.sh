@@ -4,6 +4,15 @@ root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 build=${BUILD_DIR:-"$root/build"}
 arch=${PACKAGE_ARCH:-$(uname -m)}
 case "$arch" in x86_64|x86) ;; i?86) arch=x86 ;; *) echo "Unsupported package architecture: $arch" >&2; exit 1 ;; esac
+name=parla
+package_arch=$arch
+revision=1
+# The package targets the hybrid OS; x86 denotes its modern compiler ABI.
+if [ "$arch" = x86 ]; then
+    name=parla_x86
+    package_arch=x86_gcc2
+    revision=2
+fi
 stage="$build/package-root"
 mkdir -p "$stage" "$root/dist"
 DESTDIR="$stage" cmake --install "$build/gui" --prefix /boot/system
@@ -20,9 +29,9 @@ if [ -f "$build/openssl-src/LICENSE.txt" ]; then
 fi
 cp "$root/subprojects/chatmail-core/LICENSE" "$payload/documentation/packages/parla/Chatmail-MPL-2.0"
 cat > "$payload/.PackageInfo" <<INFO
-name parla
-version 0.1.0-1
-architecture $arch
+name $name
+version 0.1.0-$revision
+architecture $package_arch
 summary "Native Chatmail and Delta Chat client"
 description "A native Haiku Interface Kit messaging client with bundled Chatmail core."
 packager "Parla contributors"
@@ -34,7 +43,7 @@ licenses {
     "MIT"
     "Apache v2"
 }
-provides { parla = 0.1.0 }
+provides { $name = 0.1.0 }
 requires {
     haiku$([ "$arch" = x86 ] && printf _x86 || true)
 $([ "$arch" = x86_64 ] && printf '    lib:libssl >= 3\n    lib:libcrypto >= 3' || true)
@@ -42,5 +51,5 @@ $([ "$arch" = x86_64 ] && printf '    lib:libssl >= 3\n    lib:libcrypto >= 3' |
 }
 INFO
 cd "$payload"
-package create "$root/dist/parla-0.1.0-1-$arch.hpkg"
-package list "$root/dist/parla-0.1.0-1-$arch.hpkg"
+package create "$root/dist/$name-0.1.0-$revision-$package_arch.hpkg"
+package list "$root/dist/$name-0.1.0-$revision-$package_arch.hpkg"

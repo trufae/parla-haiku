@@ -1,0 +1,35 @@
+name: Publish x86 hybrid packaging fix
+on:
+  push:
+    branches: [main]
+    paths: ["docs/releases/repair-x86.json"]
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  package:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install official Haiku package tools
+        run: |
+          curl -fsSL --retry 3 https://github.com/haiku/haiku-toolchains-ubuntu/releases/download/hosttools-hrev60192/x86_64-linux-hosttools-hrev60192.zip -o /tmp/hosttools.zip
+          echo '4472719de58fae1517fc2c1eb892e2284ad719cb0f878701486c2c08cd2e7af3  /tmp/hosttools.zip' | sha256sum -c -
+          unzip -q /tmp/hosttools.zip -d /tmp/hosttools
+          chmod +x /tmp/hosttools/package
+          mkdir -p /home/runner/work/haiku-toolchains-ubuntu/haiku-toolchains-ubuntu/haiku/data/system/data
+      - name: Repackage and verify unchanged executables
+        run: PATH="/tmp/hosttools:$PATH" LD_LIBRARY_PATH=/tmp/hosttools sh scripts/repack-x86.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: parla-haiku-x86-fixed
+          path: dist/*
+          if-no-files-found: error
+      - name: Publish packaging revision
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create v0.1.0-2 dist/* --draft --prerelease --target "$GITHUB_SHA" --title 'Parla 0.1.0-2 — Haiku 32-bit packaging fix' --notes-file docs/releases/v0.1.0-2.md
+          gh release edit v0.1.0-2 --draft=false
+          gh release edit v0.1.0 --notes-file docs/releases/v0.1.0.md

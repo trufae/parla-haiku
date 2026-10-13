@@ -51,7 +51,9 @@ for arch, workflow in (("x86", ".github/workflows/haiku-x86.yml"),
     destination = assets / arch
     gh("run", "download", run_id, "--name", f"parla-haiku-{arch}",
        "--dir", destination)
-    package = destination / f"parla-{version}-1-{arch}.hpkg"
+    filename = (f"parla_x86-{version}-2-x86_gcc2.hpkg" if arch == "x86"
+                else f"parla-{version}-1-x86_64.hpkg")
+    package = destination / filename
     assert package.stat().st_size > 1_000_000, f"{arch}: missing or truncated package"
     assert package.read_bytes()[:4] == b"hpkg", f"{arch}: invalid package header"
     packages.append(package)
