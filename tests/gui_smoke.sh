@@ -4,9 +4,14 @@ root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT HUP INT TERM
 export DC_ACCOUNTS_PATH="$tmp/accounts"
-export PARLA_RPC_SERVER="$root/build/core/target/release/deltachat-rpc-server"
+# Exercise the installed executable and its adjacent bundled core.
+unset PARLA_RPC_SERVER
+entry=/boot/system/data/deskbar/menu/Applications/Parla
+test -L "$entry"
+test -x "$entry"
+test "$(readlink "$entry")" = ../../../../apps/Parla/Parla
 export PARLA_SMOKE_MARKER="$tmp/handshake"
-"$root/build/gui/Parla" --smoke-test &
+"$entry" --smoke-test &
 pid=$!
 captured=false
 mkdir -p "$root/dist"

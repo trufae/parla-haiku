@@ -6,9 +6,15 @@
 class ParlaApplication : public BApplication {
 public:
     ParlaApplication(bool smoke) : BApplication(kAppSignature), fSmoke(smoke) {}
-    void ReadyToRun() override { (new MainWindow(fSmoke))->Show(); }
+    void ReadyToRun() override {
+        try { (new MainWindow(fSmoke))->Show(); }
+        catch (const std::exception& error) {
+            (new BAlert("Parla startup error", error.what(), "Quit"))->Go();
+            PostMessage(B_QUIT_REQUESTED);
+        }
+    }
     void AboutRequested() override {
-        (new BAlert("About", "Parla for Haiku 0.1.1\n\nNative messaging with Chatmail core.\nCompatible with Delta Chat.\n\nGNU GPL version 3 or later.\nChatmail core: Mozilla Public License 2.0.\nName and artwork are provisional.", "OK"))->Go(nullptr);
+        (new BAlert("About", "Parla for Haiku 0.1.2\n\nNative messaging with Chatmail core.\nCompatible with Delta Chat.\n\nGNU GPL version 3 or later.\nChatmail core: Mozilla Public License 2.0.\nName and artwork are provisional.", "OK"))->Go(nullptr);
     }
 private: bool fSmoke;
 };

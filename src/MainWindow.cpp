@@ -30,7 +30,9 @@ public:
 };
 void Clear(BListView* list) { while (auto* item = list->RemoveItem(int32(0))) delete item; }
 const char* Field(const BMessage& message, const char* name) {
-    const char* value = ""; message.FindString(name, &value); return value;
+    // FindString clears its output on failure; initialization is not a fallback.
+    const char* value = nullptr;
+    return message.FindString(name, &value) == B_OK && value ? value : "";
 }
 BMenuItem* MenuItem(BMenu* menu, const char* label, uint32 what, char shortcut = 0) {
     auto* item = new BMenuItem(label, new BMessage(what), shortcut);
@@ -49,6 +51,7 @@ MainWindow::MainWindow(bool smokeTest)
     BPath path;
     if (find_directory(B_USER_SETTINGS_DIRECTORY, &path) != B_OK) throw std::runtime_error("Cannot find user settings");
     path.Append(kSettingsFolder); fSettings = path.Path();
+    if (const char* settingsOverride = getenv("PARLA_SETTINGS_PATH")) fSettings = settingsOverride;
     if (fSmokeTest && getenv("DC_ACCOUNTS_PATH"))
         fSettings = std::string(getenv("DC_ACCOUNTS_PATH")) + "-settings";
     create_directory(fSettings.c_str(), 0700); chmod(fSettings.c_str(), 0700);
@@ -61,8 +64,14 @@ MainWindow::MainWindow(bool smokeTest)
     if (drafts) {
         Json data = Json::parse(drafts, nullptr, false);
         if (data.is_array()) for (auto& draft : data)
-            if (draft.is_object() && draft.contains("account") && draft.contains("chat"))
-                fDrafts[{draft.value("account",0u),draft.value("chat",0u)}] = draft;
+            if (draft.is_object() && draft.contains("account") && draft["account"].is_number_unsigned()
+                && draft["account"].get<uint64_t>() > 0 && draft["account"].get<uint64_t>() <= UINT32_MAX
+                && draft.contains("chat") && draft["chat"].is_number_unsigned()
+                && draft["chat"].get<uint64_t>() > 0 && draft["chat"].get<uint64_t>() <= UINT32_MAX) {
+                if (!draft.contains("quote") || !draft["quote"].is_number_unsigned()
+                    || draft["quote"].get<uint64_t>() > UINT32_MAX) draft["quote"] = 0u;
+                fDrafts[{draft["account"].get<uint32>(),draft["chat"].get<uint32>()}] = draft;
+            }
     }
     auto* menu = new BMenuBar("menu");
     auto* profile = new BMenu("Profile"); menu->AddItem(profile);
@@ -456,13 +465,16 @@ bool MainWindow::QuitRequested() {
     BFile file((fSettings + "/window").c_str(),B_WRITE_ONLY | B_CREATE_FILE | B_ERASE_FILE); settings.Flatten(&file);
     be_app->PostMessage(B_QUIT_REQUESTED); return true;
 }
-void MainWindow::MessageReceived(BMessage* message) {
+void MainWindow::MessageReceived(BMessage* message) try {
     if (!fReady && (message->what == 'prof' || message->what == 'mail' || message->what == 'link')) {
         ShowError(fLastError.empty() ? "Chatmail is not connected yet. If startup failed, restart Parla to reconnect." : fLastError);
         return;
     }
-    uint32 account = fAccount, chat = fChat, msgid = 0;
-    message->FindUInt32("account",&account); message->FindUInt32("chat",&chat); message->FindUInt32("message",&msgid);
+    // FindUInt32 also zeroes its output on failure. Menu and drop messages
+    // usually omit these fields and must retain the current selection.
+    uint32 account = message->GetUInt32("account", fAccount);
+    uint32 chat = message->GetUInt32("chat", fChat);
+    uint32 msgid = message->GetUInt32("message", 0);
     auto selected = SelectedMessage();
     uint32 selectedId = selected.value("id",0u);
     switch (message->what) {
@@ -514,9 +526,9 @@ void MainWindow::MessageReceived(BMessage* message) {
     case 'crpr': case 'crml': case 'crlk': CreateProfile(*message); break;
     case 'sett':
         if (fAccount) Call("get_config",Json::array({fAccount,"displayname"}),[this,account](const Json& name) {
-            if (account == fAccount && name.is_string())
+            if (account == fAccount && (name.is_string() || name.is_null()))
                 Form("Profile settings","Update your name, or retry incomplete profile setup.",
-                    {{"Display name:",name.get<std::string>()}},'svst',"Save / retry setup");
+                    {{"Display name:",name.is_string() ? name.get<std::string>() : ""}},'svst',"Save / retry setup");
         });
         break;
     case 'svst':
@@ -669,4 +681,7 @@ void MainWindow::MessageReceived(BMessage* message) {
     case 'noop': break;
     default: BWindow::MessageReceived(message);
     }
+} catch (const std::exception& error) {
+    // Never let input/JSON exceptions unwind through Haiku's window looper.
+    ShowError(std::string("Cannot complete this action: ") + error.what());
 }

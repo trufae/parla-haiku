@@ -53,7 +53,7 @@ cmake -S "$root" -B "$BUILD_DIR/gui" -G Ninja \
     -DCMAKE_SYSTEM_NAME=Haiku -DCMAKE_SYSTEM_PROCESSOR=x86 \
     -DCMAKE_CXX_COMPILER=/tools/cross-tools-x86/bin/i586-pc-haiku-g++ \
     -DCMAKE_HAIKU_SECONDARY_ARCH=x86 \
-    -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF \
+    -DCMAKE_BUILD_TYPE=RelWithDebInfo -DBUILD_TESTING=OFF \
     -DCORE_BINARY="$BUILD_DIR/core/target/i686-unknown-haiku/release/deltachat-rpc-server"
 cmake --build "$BUILD_DIR/gui" -j2
 # Fail rather than accidentally shipping a host or 64-bit executable as x86.
