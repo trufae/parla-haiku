@@ -165,11 +165,30 @@ public:
                     if (item->Message()->GetUInt32("account",0) == 7 && item->IsMarked()) selected = true;
                 }
                 fWindow->Unlock(); if (!selected) return;
+                fSelectionCalls = SelectionCalls();
+                BMessage away('acct'); away.AddUInt32("account",8); fWindow->PostMessage(&away);
+                BMessage back('acct'); back.AddUInt32("account",7); fWindow->PostMessage(&back);
+                ++fStage;
+            } else if (fStage == 19) {
+                if (SelectionCalls() < fSelectionCalls + 2) return;
+                CHECK(fLastSelected == 7);
                 status = 0; PostMessage(B_QUIT_REQUESTED);
             }
         } catch (const std::exception& e) { Fail(e.what()); }
     }
 private:
+    size_t fSelectionCalls = 0;
+    uint32 fLastSelected = 0;
+    size_t SelectionCalls() {
+        size_t count = 0; std::ifstream log(getenv("PARLA_TEST_RPC_LOG")); std::string line;
+        while (std::getline(log,line)) {
+            auto value = Json::parse(line,nullptr,false);
+            if (value.is_object() && String(value,"method") == "select_account") {
+                ++count; fLastSelected = value["params"][0].get<uint32>();
+            }
+        }
+        return count;
+    }
     bool Click(const char* title, const char* name) {
         for (int32 i = 0; i < CountWindows(); ++i) {
             auto* window = WindowAt(i);

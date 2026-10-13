@@ -25,6 +25,10 @@ int main() {
             result = Json::array();
             for (uint32_t id = 7; id <= last; ++id) if (!removed.count(id))
                 result.push_back({{"id",id},{"kind",configured.count(id) ? "Configured" : "Unconfigured"},{"displayName","Fixture"}});
+            // Return a pre-delete snapshot AFTER the new list, like concurrent RPC.
+            if (sent && !removed.count(9) && !staleId) {
+                staleId = request.at("id"); staleAccounts = result; continue;
+            }
         } // Simulate a stale selection snapshot after deletion; UI must validate IDs.
         else if (method == "get_selected_account_id") result = removed.count(9) ? 9 : selected;
         else if (method == "add_account") result = ++last;

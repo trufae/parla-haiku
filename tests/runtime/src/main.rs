@@ -36,8 +36,13 @@ async fn sockets() {
         for job in jobs { job.await.unwrap(); }
     });
     let mut clients = Vec::new();
+    // Haiku's hard descriptor limit can be 256. Retain 128 exchanges while
+    // keeping at most 32 client/server pairs open concurrently.
+    let slots = std::sync::Arc::new(tokio::sync::Semaphore::new(32));
     for id in 0u64..128 {
+        let slots = slots.clone();
         clients.push(tokio::spawn(async move {
+            let _slot = slots.acquire_owned().await.unwrap();
             // Blocking DB-style work must yield and then wake the executor.
             let payload = tokio::task::spawn_blocking(move || id.to_be_bytes()).await.unwrap();
             let mut socket = tokio::net::TcpStream::connect(address).await.unwrap();
