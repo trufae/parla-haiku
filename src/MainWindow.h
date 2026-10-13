@@ -8,6 +8,7 @@
 #include <StringView.h>
 #include <map>
 #include <memory>
+#include <set>
 
 class MainWindow : public BWindow {
 public:
@@ -28,7 +29,13 @@ private:
     void Send();
     void SaveDraft();
     void ShowError(const std::string& error);
-    void Form(const char* title, const char* help, std::vector<FormField> fields, uint32 what, const char* action = "OK");
+    void Log(const std::string& text);
+    void Diagnostics();
+    void ProfileSettings(uint32 account);
+    void Connection(uint32 account);
+    void RemoveProfile(uint32 account);
+    void WriteDrafts();
+    void Form(const char* title, const char* help, std::vector<FormField> fields, uint32 what, const char* action = "OK", uint32 retryAccount = 0);
     void CreateProfile(const BMessage& message);
     void OpenAttachment();
     void MarkVisible();
@@ -53,7 +60,11 @@ private:
     int fEventRetryTicks = 0;
     size_t fLimit = 100;
     std::string fAttachment, fSettings;
-    std::string fLastError;
+    std::string fLastError, fLog, fAccountsPath, fStartup;
+    std::set<uint32> fSetupAccounts;
+    BMessenger fDiagnosticsWindow;
+    bool fLogChanged = false;
+    std::vector<std::string> fSecrets;
     BMessenger fErrorAlert;
     std::map<std::pair<uint32,uint32>, Json> fDrafts;
     std::map<std::pair<uint32,uint32>, std::string> fSeen;

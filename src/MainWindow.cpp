@@ -21,13 +21,10 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include <cstdio>
+#include <ctime>
+#include <Invoker.h>
 
 namespace {
-class ChatItem : public BStringItem {
-public:
-    ChatItem(uint32 id, const std::string& label) : BStringItem(label.c_str()), id(id) {}
-    uint32 id;
-};
 void Clear(BListView* list) { while (auto* item = list->RemoveItem(int32(0))) delete item; }
 const char* Field(const BMessage& message, const char* name) {
     // FindString clears its output on failure; initialization is not a fallback.
@@ -81,12 +78,15 @@ MainWindow::MainWindow(bool smokeTest)
     profile->AddSeparatorItem();
     fAccounts = new BMenu("Switch profile"); profile->AddItem(fAccounts);
     MenuItem(profile,"Profile settings…",'sett');
+    MenuItem(profile,"Delete this profile…",'rmcf');
+    MenuItem(profile,"Open accounts folder",'adir');
     MenuItem(profile,"Copy my invitation",'invt');
     profile->AddSeparatorItem();
     MenuItem(profile,"Import backup…",'impt'); MenuItem(profile,"Export backup…",'expt');
     profile->AddSeparatorItem();
     MenuItem(profile,"About Parla…",B_ABOUT_REQUESTED)->SetTarget(be_app);
     MenuItem(profile,"Last error…",'err!');
+    MenuItem(profile,"Diagnostics…",'diag','D');
     MenuItem(profile,"Quit",B_QUIT_REQUESTED,'Q');
     auto* editMenu = new BMenu("Edit"); menu->AddItem(editMenu);
     MenuItem(editMenu,"Cut",B_CUT,'X'); MenuItem(editMenu,"Copy",B_COPY,'C');
@@ -120,17 +120,19 @@ MainWindow::MainWindow(bool smokeTest)
     fComposer = new Composer();
     auto* composeScroll = new BScrollView("composeScroll",fComposer,0,false,true);
     fSend = new BButton("send","Send",new BMessage(kSend));
-    fAttach = new BButton("attach","Attach…",new BMessage('atch'));
+    fAttach = new BButton("attach","+",new BMessage('atch'));
+    fAttach->SetToolTip("Attach a file");
     fAccept = new BButton("accept","Accept contact request",new BMessage('acpt'));
     fOlder = new BButton("older","Load earlier messages",new BMessage('oldr'));
-    fDraftLabel = new BStringView("draft","Enter sends · Shift+Enter adds a line");
+    fDraftLabel = new BStringView("draft","");
+    fComposer->SetToolTip("Enter sends · Shift+Enter adds a line");
     auto* conversation = new BGroupView(B_VERTICAL);
     BLayoutBuilder::Group<>(conversation,B_VERTICAL).SetInsets(B_USE_DEFAULT_SPACING)
         .AddGroup(B_HORIZONTAL).Add(fTitle).AddGlue().Add(fAccept).End()
-        .Add(fOlder).Add(scroll).Add(fDraftLabel).Add(composeScroll)
-        .AddGroup(B_HORIZONTAL).Add(fAttach)
-            .Add(new BButton("clearAttachment","Clear attachment / reply",new BMessage('clra')))
-            .AddGlue().Add(fSend).End();
+        .Add(fOlder).Add(scroll, 1).Add(fDraftLabel)
+        .AddGroup(B_HORIZONTAL).Add(fAttach).Add(composeScroll, 1).Add(fSend).End();
+    auto* clear = new BMenuItem("Clear attachment / reply", new BMessage('clra'));
+    message->AddItem(clear);
     auto* split = new BSplitView(B_HORIZONTAL); split->AddChild(side); split->AddChild(conversation);
     split->SetItemWeight(split->GetLayout()->ItemAt(0),0.28f);
     split->SetItemWeight(split->GetLayout()->ItemAt(1),0.72f);
@@ -139,31 +141,67 @@ MainWindow::MainWindow(bool smokeTest)
     fTitle->SetTruncation(B_TRUNCATE_END);
     fDraftLabel->SetTruncation(B_TRUNCATE_END);
     BLayoutBuilder::Group<>(this,B_VERTICAL,0).Add(menu).Add(split).Add(fStatus);
-    fAccept->Hide(); fOlder->SetEnabled(false); SetComposeEnabled(false);
+    fAccept->Hide(); fOlder->Hide(); fOlder->SetEnabled(false); SetComposeEnabled(false);
     BMessage pulse('tick'); fPulse = std::make_unique<BMessageRunner>(BMessenger(this), &pulse, 500000);
     PostMessage('boot');
 }
 MainWindow::~MainWindow() { fPulse.reset(); fRpc.Stop(); Clear(fChats); Clear(fMessages); }
 void MainWindow::ShowError(const std::string& text) {
-    fLastError = text; fStatus->SetText(text.c_str());
+    fLastError = text; fStatus->SetText(text.c_str()); Log("ERROR " + text);
     fprintf(stderr, "Parla: %s\n", text.c_str());
     // Keep full diagnostics visible without stacking alerts for pending RPCs.
     if (!fErrorAlert.IsValid()) {
-        auto* alert = new BAlert("Parla error", text.c_str(), "OK");
-        fErrorAlert = BMessenger(alert); alert->Go(nullptr);
+        auto* alert = new BAlert("Parla error", text.c_str(), "OK", "Diagnostics…");
+        fErrorAlert = BMessenger(alert); alert->Go(new BInvoker(new BMessage('dtls'),this));
     }
 }
+void MainWindow::Log(const std::string& text) {
+    std::string safe = text;
+    for (const auto& secret : fSecrets) if (!secret.empty()) {
+        size_t pos = 0;
+        while ((pos = safe.find(secret, pos)) != std::string::npos) { safe.replace(pos, secret.size(), "[redacted]"); pos += 10; }
+    }
+    // Normalize invalid UTF-8 from stderr before handing it to native text views.
+    safe = Json::parse(Json(safe).dump(-1, ' ', false, Json::error_handler_t::replace)).get<std::string>();
+    time_t now = time(nullptr); tm local{}; localtime_r(&now, &local);
+    char stamp[32]; strftime(stamp, sizeof stamp, "%H:%M:%S", &local);
+    fLog += std::string(stamp) + " " + safe + "\n";
+    if (fLog.size() > 65536) {
+        size_t cut = fLog.find('\n', fLog.size() - 65536);
+        fLog.erase(0, cut == std::string::npos ? fLog.size() : cut + 1);
+    }
+    fLogChanged = true;
+}
+void MainWindow::Diagnostics() {
+    std::string text = fStartup + "\nActive profile: " + std::to_string(fAccount)
+        + (fReady ? " · RPC connected\n" : " · RPC disconnected\n")
+        + "Last error: " + (fLastError.empty() ? "none" : fLastError) + "\n\n" + fLog;
+    if (!fDiagnosticsWindow.IsValid()) fDiagnosticsWindow = BMessenger(new DiagnosticsWindow(text));
+    else { BMessage update('logs'); update.AddString("text", text.c_str()); fDiagnosticsWindow.SendMessage(&update); }
+}
 void MainWindow::Call(const char* method, Json params, Callback callback, int timeout) {
+    std::string operation(method);
+    if (!params.empty() && params[0].is_number()) operation += " profile=" + params[0].dump();
+    if (std::string(method) == "send_msg" && params.size() > 1) operation += " chat=" + params[1].dump();
+    bool trace = std::string(method) != "get_next_event_batch";
     try {
         uint64_t id = fRpc.Call(method,params,timeout);
-        fCallbacks[id] = [this,callback](const Json& response) {
+        operation = "RPC #" + std::to_string(id) + " " + operation;
+        auto started = system_time();
+        if (trace) Log(operation + " request"); // Never log passwords, setup codes or message bodies.
+        fCallbacks[id] = [this,callback,operation,started,trace](const Json& response) {
+            std::string elapsed = " (" + std::to_string((system_time() - started) / 1000) + " ms)";
             if (response.contains("error")) {
-                ShowError(String(response["error"],"message","Chatmail operation failed"));
-                // Distinguish errors from successful void RPC responses (JSON null).
-                if (callback) callback(Json{{"_rpcError", true}});
-            } else if (callback) callback(response.value("result",Json()));
+                ShowError(operation + elapsed + ": " + String(response["error"],"message","Chatmail operation failed"));
+                if (callback) callback(Json{{"_rpcError", true},{"message",String(response["error"],"message")}});
+            } else {
+                auto result = response.value("result",Json());
+                if (trace) Log(operation + elapsed + " result=" +
+                    (result.is_primitive() && !result.is_string() ? result.dump() : std::string(result.type_name())));
+                if (callback) callback(result);
+            }
         };
-    } catch (const std::exception& e) { ShowError(e.what()); if (callback) callback(Json{{"_rpcError", true}}); }
+    } catch (const std::exception& e) { ShowError(operation + ": " + e.what()); if (callback) callback(Json{{"_rpcError", true}}); }
 }
 void MainWindow::Start() {
     app_info info; be_app->GetAppInfo(&info);
@@ -172,6 +210,11 @@ void MainWindow::Start() {
     std::string executable = override ? override : app.Path();
     const char* accountsOverride = getenv("DC_ACCOUNTS_PATH");
     std::string accounts = accountsOverride ? accountsOverride : fSettings + "/accounts";
+    fAccountsPath = accounts;
+    fStartup = std::string("Parla ") + kAppVersion + " · " + std::to_string(sizeof(void*) * 8) + "-bit\nAccounts: " + accounts
+        + "\nServer: " + executable + "\nTLS CA: "
+        + (getenv("SSL_CERT_FILE") ? getenv("SSL_CERT_FILE") : "/boot/system/data/ssl/CARootCertificates.pem");
+    Log(fStartup);
     create_directory(accounts.c_str(),0700); chmod(accounts.c_str(),0700);
     try {
         BMessenger target(this);
@@ -218,6 +261,9 @@ void MainWindow::SaveDraft() {
     if (!fAccount || !fChat) return;
     fDrafts[{fAccount,fChat}] = {{"account",fAccount},{"chat",fChat},{"text",fComposer->Text()},
         {"file",fAttachment},{"quote",fQuote}};
+    WriteDrafts();
+}
+void MainWindow::WriteDrafts() {
     Json all = Json::array();
     for (const auto& d : fDrafts) if (!String(d.second,"text").empty() || !String(d.second,"file").empty()) all.push_back(d.second);
     std::string temp = fSettings + "/drafts.json.tmp";
@@ -234,7 +280,7 @@ void MainWindow::SelectAccount(uint32 id) {
         if (item->Message()) item->Message()->FindUInt32("account", &account);
         item->SetMarked(account == id);
     }
-    Call("select_account",Json::array({id})); RefreshChats();
+    Call("select_account",Json::array({id})); RefreshChats(); Connection(id);
 }
 void MainWindow::RefreshChats() {
     if (!fReady || !fAccount) return;
@@ -251,12 +297,8 @@ void MainWindow::RefreshChats() {
                 if (!items.contains(key)) continue;
                 const auto& item = items[key];
                 if (String(item,"kind") != "ChatListItem") continue;
-                std::string label = String(item,"name");
-                unsigned unread = item.value("freshMessageCounter",0u);
-                if (unread) label += " (" + std::to_string(unread) + ")";
-                if (item.value("isContactRequest",false)) label += " · request";
                 if (id.get<uint32>() == fChat) selected = fChats->CountItems();
-                fChats->AddItem(new ChatItem(id.get<uint32>(),label));
+                fChats->AddItem(new ChatItem(item));
             }
             if (selected >= 0) fChats->Select(selected);
         });
@@ -275,7 +317,7 @@ void MainWindow::SelectChat(uint32 id) {
         fComposer->SetText(String(draft->second,"text").c_str());
         fAttachment = String(draft->second,"file"); fQuote = draft->second.value("quote",0u);
     }
-    fDraftLabel->SetText(fAttachment.empty() ? "Enter sends · Shift+Enter adds a line" : fAttachment.c_str());
+    fDraftLabel->SetText(fAttachment.empty() ? "" : fAttachment.c_str());
     SetComposeEnabled(false); RefreshMessages();
 }
 void MainWindow::RefreshMessages(bool older) {
@@ -298,6 +340,8 @@ void MainWindow::RefreshMessages(bool older) {
         if (!all.is_array()) { fRefreshing = false; return; }
         Json ids = Json::array(); size_t first = all.size() > fLimit ? all.size() - fLimit : 0;
         fOlder->SetEnabled(first > 0);
+        if (first && fOlder->IsHidden()) fOlder->Show();
+        else if (!first && !fOlder->IsHidden()) fOlder->Hide();
         for (size_t i = first; i < all.size(); ++i) ids.push_back(all[i]);
         Call("get_messages",Json::array({account,ids}),[this,generation,request,ids,older](const Json& objects) {
             if (generation != fGeneration || request != fMessageRequest) return;
@@ -364,6 +408,19 @@ void MainWindow::Events() {
                 notification.SetTitle("New message"); notification.SetContent("Open Parla to read your messages.");
                 notification.SetOnClickApp(kAppSignature); notification.Send();
             }
+            std::string detail = String(data,"msg",String(data,"comment"));
+            if (!detail.empty() || kind == "MsgFailed" || kind == "MsgDelivered" || kind == "ConfigureProgress")
+                Log("Core profile=" + std::to_string(account) + " " + kind + " " + detail
+                    + (data.contains("msgId") ? " message=" + data["msgId"].dump() : ""));
+            if (kind == "AccountsChanged" || kind == "AccountChanged") LoadAccounts();
+            if (kind == "MsgFailed") {
+                uint32 msg = data.value("msgId",0u);
+                Call("get_message",Json::array({account,msg}),[this,account,msg](const Json& value) {
+                    if (value.is_object() && !value.contains("_rpcError"))
+                        ShowError("Sending failed · profile " + std::to_string(account) + " · message " + std::to_string(msg)
+                            + ": " + String(value,"error","See Diagnostics for server details."));
+                });
+            }
             if (account != fAccount) continue;
             if (kind == "Error") ShowError(String(data,"msg"));
             if (kind == "ConfigureProgress" || kind == "ImexProgress") {
@@ -378,14 +435,23 @@ void MainWindow::Events() {
                 || kind == "ChatlistItemChanged" || kind == "ChatModified") chats = true;
             if (kind == "MsgsChanged" || kind == "IncomingMsg" || kind == "MsgDelivered" || kind == "MsgRead"
                 || kind == "MsgFailed" || kind == "ChatModified" || kind == "ReactionsChanged") messages = true;
-            if (kind == "ConnectivityChanged") Call("get_connectivity",Json::array({fAccount}),[this](const Json& c) {
-                if (c.is_number()) fStatus->SetText(c.get<int>() >= 4000 ? "Connected" : "Connecting / offline · queued messages are kept");
-            });
+            if (kind == "ConnectivityChanged") Connection(account);
+            if (kind == "MsgDelivered") fStatus->SetText("Message sent to server");
         }
         if (chats) RefreshChats();
         if (messages) RefreshMessages();
         Events();
     },0);
+}
+void MainWindow::Connection(uint32 account) {
+    if (!account) return;
+    Call("get_connectivity",Json::array({account}),[this,account](const Json& c) {
+        if (c.is_number() && account == fAccount && !fSetupAccounts.count(account)) {
+            auto value = c.get<int>();
+            fStatus->SetText(value >= 4000 ? "Connected" : value >= 3000 ? "Working…"
+                : value >= 2000 ? "Connecting…" : "Offline · messages remain queued · Profile → Diagnostics");
+        }
+    });
 }
 void MainWindow::Send() {
     if (!fReady || !fCanSend || fSending || (!fComposer->TextLength() && fAttachment.empty())) return;
@@ -400,7 +466,7 @@ void MainWindow::Send() {
             fDrafts.erase({account,chat});
             if (generation == fGeneration) {
                 fComposer->SetText(""); fQuote = 0; fAttachment.clear(); SaveDraft();
-                fDraftLabel->SetText("Enter sends · Shift+Enter adds a line"); fStatus->SetText("Message queued");
+                fDraftLabel->SetText(""); fStatus->SetText("Message queued · waiting for server");
             }
         }
         SetComposeEnabled(fCanSend); RefreshChats(); if (generation == fGeneration) RefreshMessages();
@@ -410,8 +476,9 @@ Json MainWindow::SelectedMessage() const {
     auto* item = dynamic_cast<MessageItem*>(fMessages->ItemAt(fMessages->CurrentSelection()));
     return item ? item->data : Json::object();
 }
-void MainWindow::Form(const char* title, const char* help, std::vector<FormField> fields, uint32 what, const char* action) {
-    BMessage message(what); message.AddUInt32("account",fAccount); message.AddUInt32("chat",fChat);
+void MainWindow::Form(const char* title, const char* help, std::vector<FormField> fields, uint32 what, const char* action, uint32 retryAccount) {
+    BMessage message(what);
+    if (retryAccount) message.AddUInt32("retryAccount", retryAccount); message.AddUInt32("account",fAccount); message.AddUInt32("chat",fChat);
     message.AddUInt32("message",SelectedMessage().value("id",0u));
     new FormWindow(title,help,std::move(fields),BMessenger(this),message,action);
 }
@@ -422,34 +489,87 @@ void MainWindow::CreateProfile(const BMessage& message) {
     if ((action == 'crml' || action == 'crlk') && credential.empty()) {
         ShowError(action == 'crml' ? "Enter an email address" : "Enter a second-device setup code"); return;
     }
-    fStatus->SetText("Creating profile…");
-    Call("add_account",Json::array(),[this,name,credential,secret,action](const Json& result) {
-        if (!result.is_number()) return;
+    if (!fSetupAccounts.empty()) { ShowError("A profile setup is still running. Wait for it to finish before retrying."); return; }
+    auto setup = [this,name,credential,secret,action](const Json& result) {
+        if (!result.is_number_unsigned()) return;
         uint32 id = result.get<uint32>();
-        // Select before configuration so its errors and progress are received.
-        SelectAccount(id); LoadAccounts();
+        fSetupAccounts.insert(id);
+        if (!credential.empty()) fSecrets.push_back(credential);
+        if (!secret.empty()) fSecrets.push_back(secret);
+        SelectAccount(id); LoadAccounts(); fStatus->SetText("Setting up profile…");
         auto done = [this,id](const Json& result) {
+            if (String(result,"message").find("result is unknown") != std::string::npos) {
+                Call("stop_ongoing_process",Json::array({id}),[this,id](const Json& stopped) {
+                    if (stopped.is_null()) fSetupAccounts.erase(id);
+                });
+                return;
+            }
+            fSetupAccounts.erase(id);
             if (result.is_object() && result.contains("_rpcError")) { LoadAccounts(); return; }
             Call("is_configured",Json::array({id}),[this,id](const Json& configured) {
                 LoadAccounts();
-                if (configured == true) { SelectAccount(id); Call("start_io",Json::array({id})); fStatus->SetText("Profile ready"); }
-                else ShowError("Profile setup incomplete. Retry from Profile settings.");
+                if (configured == true) Call("start_io",Json::array({id}),[this,id](const Json& started) {
+                    if (started.is_null() && id == fAccount) { RefreshChats(); fStatus->SetText("Profile ready"); }
+                });
+                else if (configured == false) ShowError("Profile setup incomplete. Open Profile settings to choose how to finish setup.");
             });
         };
         Call("set_config",Json::array({id,"displayname",name}),[this,id,credential,secret,action,done](const Json& setName) {
-            if (!setName.is_null()) return;
+            if (!setName.is_null()) { done(setName); return; }
             if (action == 'crml') {
-                Call("set_config",Json::array({id,"addr",credential}),[this,id,secret,done](const Json& setAddress) {
-                    if (!setAddress.is_null()) return;
-                    Call("set_config",Json::array({id,"mail_pw",secret}),[this,id,done](const Json& setPassword) {
-                        if (setPassword.is_null()) Call("configure",Json::array({id}),done,300);
-                    });
-                });
+                // Use the current API. Legacy configure() reads unrelated stored keys.
+                Call("add_or_update_transport",Json::array({id,Json{{"addr",credential},{"password",secret}}}),done,300);
             } else if (action == 'crlk') Call("get_backup",Json::array({id,credential}),done,300);
             else Call("init_transports",Json::array({id,credential.empty() ? Json() : Json(credential)}),done,300);
         });
+    };
+    uint32 retry = message.GetUInt32("retryAccount", 0);
+    if (retry) Call("is_configured",Json::array({retry}),[this,retry,setup](const Json& configured) {
+        if (configured == false) setup(Json(retry));
+        else if (configured == true) ShowError("This profile is already configured. Open Diagnostics to investigate connectivity.");
+    });
+    else { fStatus->SetText("Creating profile…"); Call("add_account",Json::array(),setup); }
+}
+void MainWindow::ProfileSettings(uint32 account) {
+    if (!account) return;
+    Call("get_config",Json::array({account,"displayname"}),[this,account](const Json& name) {
+        if (!name.is_string() && !name.is_null()) return;
+        Call("is_configured",Json::array({account}),[this,account,name](const Json& configured) {
+            if (!configured.is_boolean()) return;
+            Call("list_transports",Json::array({account}),[this,account,name,configured](const Json& transports) {
+                if (!transports.is_array() || account != fAccount) return;
+                std::string details = "Profile " + std::to_string(account)
+                    + (configured == true ? " · configured\n" : " · setup incomplete\nChoose Chatmail, existing email or device transfer below.\n");
+                for (const auto& transport : transports) details += "\nEmail: " + String(transport,"addr")
+                    + "\nIMAP: " + String(transport,"imapServer","automatic")
+                    + " · SMTP: " + String(transport,"smtpServer","automatic") + "\n";
+                details += "\nAccounts folder: " + fAccountsPath;
+                new ProfileWindow(BMessenger(this),account,name.is_string() ? name.get<std::string>() : "",details,configured == true);
+            });
+        });
     });
 }
+void MainWindow::RemoveProfile(uint32 account) {
+    if (!account) return;
+    if (fSetupAccounts.count(account)) { ShowError("Wait for profile setup to finish before deleting it."); return; }
+    auto* alert = new BAlert("Delete profile", ("Permanently delete profile " + std::to_string(account)
+        + " and its messages and attachments from this computer? Other devices are unaffected.\n\nFolder: "
+        + fAccountsPath).c_str(), "Cancel", "Delete", nullptr, B_WIDTH_AS_USUAL, B_WARNING_ALERT);
+    if (alert->Go() != 1) return;
+    Call("remove_account",Json::array({account}),[this,account](const Json& result) {
+        if (!result.is_null()) return;
+        if (fAccount == account) {
+            fAccount = fChat = fQuote = 0; ++fGeneration; ++fChatRequest;
+            fRefreshing = fRefreshAgain = false; fAttachment.clear(); fComposer->SetText("");
+            fDraftLabel->SetText(""); Clear(fChats); Clear(fMessages); SetComposeEnabled(false);
+        }
+        for (auto i = fDrafts.begin(); i != fDrafts.end();) {
+            if (i->first.first == account) i = fDrafts.erase(i); else ++i;
+        }
+        WriteDrafts(); LoadAccounts(); fStatus->SetText("Profile deleted from this computer");
+    });
+}
+
 void MainWindow::OpenAttachment() {
     auto message = SelectedMessage(); std::string path = String(message,"file");
     if (path.empty()) { ShowError("Select a downloaded attachment first"); return; }
@@ -496,10 +616,25 @@ void MainWindow::MessageReceived(BMessage* message) try {
         }
         break;
     }
-    case 'tick':
+    case 'tick': {
+        auto output = fRpc.TakeDiagnostics();
+        if (!output.empty()) Log("Server stderr: " + output);
+        if (fLogChanged) {
+            if (fDiagnosticsWindow.IsValid()) Diagnostics();
+            fLogChanged = false;
+        }
         MarkVisible();
         if (fEventRetryTicks > 0 && --fEventRetryTicks == 0) Events();
         break;
+    }
+    case 'dtls': if (message->GetInt32("which",0) == 1) Diagnostics(); break;
+    case 'diag': Diagnostics(); break;
+    case 'rmcf': RemoveProfile(account); break;
+    case 'adir': {
+        entry_ref ref;
+        if (get_ref_for_path(fAccountsPath.c_str(), &ref) == B_OK) be_roster->Launch(&ref);
+        break;
+    }
     case 'err!': ShowError(fLastError.empty() ? "No errors reported" : fLastError); break;
     case 'acct': SelectAccount(account); break;
     case 'srch': RefreshChats(); break;
@@ -524,22 +659,22 @@ void MainWindow::MessageReceived(BMessage* message) try {
             {{"Display name:",""},{"Setup code:",""}},'crlk',"Link");
         break;
     case 'crpr': case 'crml': case 'crlk': CreateProfile(*message); break;
-    case 'sett':
-        if (fAccount) Call("get_config",Json::array({fAccount,"displayname"}),[this,account](const Json& name) {
-            if (account == fAccount && (name.is_string() || name.is_null()))
-                Form("Profile settings","Update your name, or retry incomplete profile setup.",
-                    {{"Display name:",name.is_string() ? name.get<std::string>() : ""}},'svst',"Save / retry setup");
-        });
-        break;
+    case 'sett': ProfileSettings(account); break;
     case 'svst':
-        if (!account) break;
-        Call("set_config",Json::array({account,"displayname",Field(*message,"field0")}),[this,account](const Json& result) {
-            if (!result.is_null()) return;
-            Call("is_configured",Json::array({account}),[this,account](const Json& c) {
-                if (c == false) Call("configure",Json::array({account}),[this](const Json&){ LoadAccounts(); },300);
-                else LoadAccounts();
-            });
+        if (account) Call("set_config",Json::array({account,"displayname",Field(*message,"field0")}),[this](const Json& result) {
+            if (result.is_null()) { LoadAccounts(); fStatus->SetText("Profile name saved"); }
         }); break;
+    case 'rprf': case 'rmai': case 'rlnk': {
+        uint32 what = message->what;
+        std::string name = Field(*message,"field0");
+        if (what == 'rprf') Form("Finish Chatmail setup","Leave invitation empty to select Chatmail relays.",
+            {{"Display name:",name},{"Invitation (optional):",""}},'crpr',"Set up",account);
+        else if (what == 'rmai') Form("Finish email setup","Enter your existing email credentials.",
+            {{"Display name:",name},{"Email address:",""},{"Password:","",true}},'crml',"Sign in",account);
+        else Form("Finish device transfer","Get a fresh Add second device code from your other device.",
+            {{"Display name:",name},{"Setup code:",""}},'crlk',"Link",account);
+        break;
+    }
     case 'newc':
         if (fAccount) Form("New chat","Enter an email address; use Join invitation for an encrypted contact invite.",
             {{"Name:",""},{"Email address:",""}},'mkch',"Create chat");
@@ -599,7 +734,7 @@ void MainWindow::MessageReceived(BMessage* message) try {
         }
         break;
     }
-    case 'clra': fAttachment.clear(); fQuote = 0; fDraftLabel->SetText("Enter sends · Shift+Enter adds a line"); SaveDraft(); break;
+    case 'clra': fAttachment.clear(); fQuote = 0; fDraftLabel->SetText(""); SaveDraft(); break;
     case 'repl': if (selectedId && fCanSend) { fQuote = selectedId; fDraftLabel->SetText(("Replying to: " + String(selected,"text")).c_str()); fComposer->MakeFocus(); } break;
     case 'copy': if (selectedId) Copy(String(selected,"text")); break;
     case 'down':

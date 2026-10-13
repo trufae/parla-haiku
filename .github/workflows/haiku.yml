@@ -70,6 +70,7 @@ jobs:
             pkgman install -y "$PWD"/dist/*-x86_64.hpkg
             sh tests/gui_smoke.sh
             cp build/gui/forms-native.png dist/parla-forms.png
+            cp build/gui/diagnostics-native.png dist/parla-diagnostics.png
       - uses: actions/upload-artifact@v4
         with:
           name: parla-haiku-x86_64
@@ -77,4 +78,5 @@ jobs:
             dist/*.hpkg
             dist/parla-native.png
             dist/parla-forms.png
+            dist/parla-diagnostics.png
           if-no-files-found: error

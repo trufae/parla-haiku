@@ -1,5 +1,11 @@
 #include "MainWindow.h"
 #include <Application.h>
+#include <Alert.h>
+#include <BitmapStream.h>
+#include <File.h>
+#include <Screen.h>
+#include <TranslatorRoster.h>
+#include <TranslatorFormats.h>
 #include <Button.h>
 #include <Directory.h>
 #include <MessageRunner.h>
@@ -36,6 +42,13 @@ public:
             } else if (fStage == 1) {
                 if (Submit("New profile", {"Català 日本語", ""})) ++fStage;
             } else if (fStage == 2) {
+                if (!fRetried) {
+                    if (Status().find("init_transports") == std::string::npos) return;
+                    CHECK(Status().find("Relay fixture unavailable") != std::string::npos);
+                    fWindow->PostMessage('sett'); fRetried = true; return;
+                }
+                if (Click("Profile settings","chatmail")) return;
+                if (Submit("Finish Chatmail setup", {"Recovered", ""})) return;
                 if (!Ready(8)) return;
                 CHECK(Has("init_transports", Json::array({8,nullptr})));
                 CHECK(Has("set_config", Json::array({8,"displayname","Català 日本語"})));
@@ -50,9 +63,9 @@ public:
                 if (Submit("Existing email", {"Email", "fixture@example.invalid", "secret"})) ++fStage;
             } else if (fStage == 6) {
                 if (!Ready(10)) return;
-                CHECK(Has("configure", Json::array({10})));
-                CHECK(Has("set_config", Json::array({10,"addr","fixture@example.invalid"})));
-                CHECK(Has("set_config", Json::array({10,"mail_pw","secret"})));
+                CHECK(Has("add_or_update_transport", Json::array({10,Json{{"addr","fixture@example.invalid"},{"password","secret"}}})));
+                CHECK(!Has("configure", Json::array({8})));
+                CHECK(!Has("configure", Json::array({10})));
                 // Menu messages have no account/chat fields. FindUInt32 used to
                 // overwrite the selected account with zero, suppressing this form.
                 fWindow->PostMessage('sett'); ++fStage;
@@ -80,11 +93,75 @@ public:
                 fWindow->PostMessage('prof'); ++fStage;
             } else if (fStage == 12) {
                 if (!Submit("New profile", {}, true)) return;
+                BMessage select('acct'); select.AddUInt32("account",9); fWindow->PostMessage(&select); ++fStage;
+            } else if (fStage == 13) {
+                CHECK(fWindow->Lock());
+                auto* chats = dynamic_cast<BListView*>(fWindow->FindView("chats"));
+                bool ready = chats && chats->CountItems();
+                if (ready) chats->Select(0);
+                fWindow->Unlock(); if (ready) ++fStage;
+            } else if (fStage == 14) {
+                CHECK(fWindow->Lock());
+                auto* send = dynamic_cast<BButton*>(fWindow->FindView("send"));
+                auto* composer = dynamic_cast<BTextView*>(fWindow->FindView("message"));
+                bool ready = send && send->IsEnabled();
+                if (ready) { CHECK(composer->Bounds().Height() < 65); composer->SetText("PRIVATE_MESSAGE_BODY"); CHECK(send->Invoke() == B_OK); }
+                fWindow->Unlock(); if (ready) ++fStage;
+            } else if (fStage == 15) {
+                if (Status().find("SMTP fixture: connection refused") == std::string::npos) return;
+                CHECK(Has("send_msg",Json::array({9,42,Json{{"text","PRIVATE_MESSAGE_BODY"}}})));
+                fWindow->PostMessage('diag'); ++fStage;
+            } else if (fStage == 16) {
+                for (int32 i = 0; i < CountWindows(); ++i) {
+                    auto* window = WindowAt(i);
+                    if (!window || !window->Lock()) continue;
+                    auto* text = dynamic_cast<BTextView*>(window->FindView("diagnostics"));
+                    if (!text) { window->Unlock(); continue; }
+                    std::string log(text->Text());
+                    CHECK(log.find("init_transports") != std::string::npos);
+                    CHECK(log.find("fixture core: relay connection refused") != std::string::npos);
+                    CHECK(log.find("send_msg") != std::string::npos);
+                    CHECK(log.find("SMTP fixture: connection refused") != std::string::npos);
+                    CHECK(log.find("PRIVATE_MESSAGE_BODY") == std::string::npos);
+                    CHECK(log.find("MUST_NOT_LOG_TRANSPORT_PASSWORD") == std::string::npos);
+                    BBitmap* bitmap = nullptr;
+                    CHECK(BScreen(window).GetBitmap(&bitmap) == B_OK);
+                    BBitmapStream stream(bitmap); BFile file("diagnostics-native.png",B_WRITE_ONLY | B_CREATE_FILE | B_ERASE_FILE);
+                    CHECK(BTranslatorRoster::Default()->Translate(&stream,nullptr,nullptr,&file,B_PNG_FORMAT) == B_OK);
+                    window->Unlock();
+                    fWindow->PostMessage('rmcf'); ++fStage; return;
+                }
+            } else if (fStage == 17) {
+                if (ConfirmDelete()) ++fStage;
+            } else if (fStage == 18) {
+                if (!Has("remove_account",Json::array({9}))) return;
+                if (!Has("select_account",Json::array({7}))) return;
                 status = 0; PostMessage(B_QUIT_REQUESTED);
             }
         } catch (const std::exception& e) { Fail(e.what()); }
     }
 private:
+    bool Click(const char* title, const char* name) {
+        for (int32 i = 0; i < CountWindows(); ++i) {
+            auto* window = WindowAt(i);
+            if (!window || !window->Lock()) continue;
+            auto* button = std::string(window->Title()) == title ? dynamic_cast<BButton*>(window->FindView(name)) : nullptr;
+            if (button) CHECK(button->Invoke() == B_OK);
+            window->Unlock(); if (button) return true;
+        }
+        return false;
+    }
+    bool ConfirmDelete() {
+        for (int32 i = 0; i < CountWindows(); ++i) {
+            auto* window = WindowAt(i);
+            if (!window || !window->Lock()) continue;
+            auto* alert = dynamic_cast<BAlert*>(window);
+            bool found = alert && std::string(alert->TextView()->Text()).find("Permanently delete profile 9") != std::string::npos;
+            if (found) CHECK(alert->ButtonAt(1)->Invoke() == B_OK);
+            window->Unlock(); if (found) return true;
+        }
+        return false;
+    }
     void Fail(const char* error) {
         fprintf(stderr, "accounts stage %d: %s\n", fStage, error);
         PostMessage(B_QUIT_REQUESTED);
@@ -125,6 +202,7 @@ private:
     }
     MainWindow* fWindow = nullptr;
     int fStage = 0, fTicks = 0;
+    bool fRetried = false;
     std::unique_ptr<BMessageRunner> fTimer;
 };
 int main(int argc, char** argv) {

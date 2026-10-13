@@ -24,7 +24,7 @@ Json Error(uint64_t id, const std::string& text) {
 RpcTransport::~RpcTransport() { Stop(); }
 void RpcTransport::Start(const std::string& executable, const std::string& accounts, Receiver receiver) {
     Stop();
-    fDiagnostics.clear();
+    fDiagnostics.clear(); fNewDiagnostics.clear();
     signal(SIGPIPE, SIG_IGN);
     int in[2] = {-1,-1}, out[2] = {-1,-1}, err[2] = {-1,-1};
     try {
@@ -33,6 +33,11 @@ void RpcTransport::Start(const std::string& executable, const std::string& accou
         for (char** e = environ; *e; ++e)
             if (strncmp(*e, "DC_ACCOUNTS_PATH=", 17)) env.emplace_back(*e);
         env.emplace_back("DC_ACCOUNTS_PATH=" + accounts);
+        if (!getenv("RUST_LOG")) env.emplace_back("RUST_LOG=info");
+        // Cross-built OpenSSL must use the installed Haiku trust store.
+#ifdef __HAIKU__
+        if (!getenv("SSL_CERT_FILE")) env.emplace_back("SSL_CERT_FILE=/boot/system/data/ssl/CARootCertificates.pem");
+#endif
         std::vector<char*> envp;
         for (auto& e : env) envp.push_back(e.data());
         envp.push_back(nullptr);
@@ -102,6 +107,9 @@ void RpcTransport::Run() {
         if (p[1].revents) {
             ssize_t n = read(fError, bytes, sizeof bytes);
             if (n > 0) {
+                std::lock_guard<std::mutex> lock(fMutex);
+                fNewDiagnostics.append(bytes, static_cast<size_t>(n));
+                if (fNewDiagnostics.size() > 32768) fNewDiagnostics.erase(0, fNewDiagnostics.size() - 32768);
                 fDiagnostics.append(bytes, static_cast<size_t>(n));
                 if (fDiagnostics.size() > 4096) fDiagnostics.erase(0, fDiagnostics.size() - 4096);
             }
@@ -148,6 +156,10 @@ void RpcTransport::Run() {
         }
         for (auto id : expired) fReceiver(Error(id, "Chatmail request timed out; its result is unknown"));
     }
+}
+std::string RpcTransport::TakeDiagnostics() {
+    std::lock_guard<std::mutex> lock(fMutex);
+    std::string result; result.swap(fNewDiagnostics); return result;
 }
 void RpcTransport::Stop() {
     fStop = true; Wake();

@@ -24,6 +24,9 @@ int main(int argc, char** argv) {
         Json text = Json::array({"Català 日本語\n\"quoted\""});
         auto longPoll = rpc.Call("hang", Json::array(), 0);
         CHECK(wait(rpc.Call("noisy", text))["result"] == text);
+        auto stderrOutput = rpc.TakeDiagnostics();
+        CHECK(!stderrOutput.empty() && stderrOutput.size() <= 32768);
+        CHECK(rpc.TakeDiagnostics().empty());
         CHECK(wait(rpc.Call("hang", Json::array(), 1)).contains("error"));
         std::vector<uint64_t> ids;
         for (int i=0; i<30; ++i) ids.push_back(rpc.Call("echo", Json::array({i})));

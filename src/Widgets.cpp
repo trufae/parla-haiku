@@ -9,6 +9,10 @@
 #include <sstream>
 #include <algorithm>
 #include <cmath>
+#include <Clipboard.h>
+#include <ScrollView.h>
+#include <CheckBox.h>
+#include <TranslationUtils.h>
 
 std::string String(const Json& value, const char* key, const std::string& fallback) {
     auto i = value.find(key);
@@ -17,8 +21,8 @@ std::string String(const Json& value, const char* key, const std::string& fallba
 Composer::Composer() : BTextView("message", B_WILL_DRAW | B_NAVIGABLE) {
     SetWordWrap(true); SetViewUIColor(B_DOCUMENT_BACKGROUND_COLOR);
     SetLowUIColor(B_DOCUMENT_BACKGROUND_COLOR);
-    SetExplicitMinSize(BSize(180, 65));
-    SetExplicitMaxSize(BSize(B_SIZE_UNLIMITED, 140));
+    SetExplicitMinSize(BSize(180, 38));
+    SetExplicitMaxSize(BSize(B_SIZE_UNLIMITED, 56));
 }
 void Composer::KeyDown(const char* bytes, int32 count) {
     if (count == 1 && bytes[0] == B_ENTER && !(modifiers() & B_SHIFT_KEY))
@@ -33,29 +37,31 @@ void Composer::MessageReceived(BMessage* message) {
     BTextView::MessageReceived(message);
 }
 MessageItem::MessageItem(Json value) : data(std::move(value)) {
-    time_t when = data.value("timestamp", int64_t(0));
-    char date[64] = ""; tm local{};
-    if (localtime_r(&when, &local)) strftime(date, sizeof date, "%x %H:%M", &local);
+    time_t when = data.value("timestamp", int64_t(0)), now = time(nullptr);
+    char date[64] = ""; tm local{}, today{}; localtime_r(&now, &today);
+    if (localtime_r(&when, &local)) strftime(date, sizeof date,
+        local.tm_year == today.tm_year && local.tm_yday == today.tm_yday ? "%H:%M" : "%d %b · %H:%M", &local);
+    fTime = date;
     auto sender = data.value("sender", Json::object());
-    fHeading = data.value("fromId", 0) == 1 ? "You" : String(sender, "displayName", String(sender, "address", "Contact"));
-    fHeading += "  ·  "; fHeading += date;
-    if (data.value("fromId", 0) == 1) {
+    fOutgoing = data.value("fromId", 0) == 1;
+    fHeading = fOutgoing ? "You" : String(sender, "displayName", String(sender, "address", "Contact"));
+    if (fOutgoing) {
         switch (data.value("state", 0)) {
-            case 19: fHeading += "  ·  draft"; break;
-            case 24: fHeading += "  ·  failed"; break;
-            case 26: fHeading += "  ·  delivered"; break;
-            case 28: fHeading += "  ·  read"; break;
-            default: fHeading += "  ·  queued";
+            case 19: fTime += " · draft"; break;
+            case 24: fTime += " · failed"; break;
+            case 26: fTime += " · sent"; break;
+            case 28: fTime += " · read"; break;
+            default: fTime += " · queued";
         }
     }
-    if (data.value("isEdited", false)) fHeading += "  ·  edited";
-    if (!data.value("showPadlock", true)) fHeading += "  ·  unencrypted email";
+    if (data.value("isEdited", false)) fTime += " · edited";
+    if (!data.value("isInfo",false) && !data.value("showPadlock",true)) fTime += " · email";
 }
 void MessageItem::Update(BView* owner, const BFont* font) {
     BListItem::Update(owner, font);
     font_height metrics; font->GetHeight(&metrics);
     fLineHeight = ceilf(metrics.ascent + metrics.descent + metrics.leading) + 2;
-    float width = std::max(40.0f, owner->Bounds().Width() - 28);
+    float width = std::max(40.0f, owner->Bounds().Width() - 70);
     std::string text;
     if (data.contains("quote") && data["quote"].is_object()) text = "> " + String(data["quote"], "text") + "\n";
     std::string body = String(data, "text");
@@ -93,15 +99,23 @@ void MessageItem::Update(BView* owner, const BFont* font) {
         }
     }
     if (fLines.empty()) fLines.emplace_back();
-    SetHeight((fLines.size() + 1) * fLineHeight + 20);
+    SetHeight((fLines.size() + 2) * fLineHeight + 24);
 }
 void MessageItem::DrawItem(BView* owner, BRect rect, bool) {
-    owner->SetHighUIColor(IsSelected() ? B_LIST_SELECTED_BACKGROUND_COLOR : B_LIST_BACKGROUND_COLOR);
-    owner->FillRect(rect);
+    owner->SetHighUIColor(B_LIST_BACKGROUND_COLOR); owner->FillRect(rect);
+    BRect bubble = rect; bubble.InsetBy(6, 4);
+    if (fOutgoing) bubble.left += 24; else bubble.right -= 24;
+    rgb_color base = ui_color(IsSelected() ? B_LIST_SELECTED_BACKGROUND_COLOR : B_PANEL_BACKGROUND_COLOR);
+    owner->SetHighColor(fOutgoing && !IsSelected() ? tint_color(base, 0.85f) : base);
+    owner->FillRoundRect(bubble, 6, 6);
     owner->SetHighUIColor(IsSelected() ? B_LIST_SELECTED_ITEM_TEXT_COLOR : B_LIST_ITEM_TEXT_COLOR);
-    BPoint point(rect.left + 12, rect.top + fLineHeight + 2);
-    owner->DrawString(fHeading.c_str(), point);
+    BFont font; owner->GetFont(&font); BFont small(font); small.SetSize(font.Size() * 0.88f);
+    BPoint point(bubble.left + 10, bubble.top + fLineHeight);
+    owner->SetFont(&small); owner->DrawString(fHeading.c_str(), point); owner->SetFont(&font);
     for (const auto& line : fLines) { point.y += fLineHeight; owner->DrawString(line.c_str(), point); }
+    owner->SetFont(&small);
+    owner->DrawString(fTime.c_str(), BPoint(std::max(bubble.left + 10, bubble.right - 10 - small.StringWidth(fTime.c_str())), bubble.bottom - 7));
+    owner->SetFont(&font);
 }
 MessageList::MessageList() : BListView("messages", B_SINGLE_SELECTION_LIST, B_WILL_DRAW | B_NAVIGABLE | B_FRAME_EVENTS) {}
 void MessageList::FrameResized(float width, float height) {
@@ -159,4 +173,100 @@ void FormWindow::MessageReceived(BMessage* message) {
     for (size_t i = 0; i < fFields.size(); ++i)
         fResult.AddString(("field" + std::to_string(i)).c_str(), fFields[i]->Text());
     if (fTarget.SendMessage(&fResult) == B_OK) Quit();
+}
+
+ChatItem::ChatItem(const Json& data) : id(data.value("id", 0u)),
+    fName(String(data,"name")), fPreview(String(data,"summaryText2")),
+    fUnread(data.value("freshMessageCounter",0u)) {
+    auto path = String(data,"avatarPath");
+    if (!path.empty()) fAvatar.reset(BTranslationUtils::GetBitmap(path.c_str()));
+    unsigned color = 0x607d8b; auto hex = String(data,"color");
+    if (!hex.empty()) sscanf(hex.c_str(), "#%x", &color);
+    fColor = {uint8(color >> 16),uint8(color >> 8),uint8(color),255};
+    size_t end = 1;
+    while (end < fName.size() && (static_cast<unsigned char>(fName[end]) & 0xc0) == 0x80) ++end;
+    fInitial = fName.substr(0,end);
+    if (data.value("isContactRequest",false)) fPreview = "Contact request · " + fPreview;
+}
+void ChatItem::Update(BView* owner, const BFont* font) {
+    BListItem::Update(owner,font); SetHeight(std::max(54.0f, font->Size() * 3.5f));
+}
+void ChatItem::DrawItem(BView* owner, BRect rect, bool) {
+    owner->SetHighUIColor(IsSelected() ? B_LIST_SELECTED_BACKGROUND_COLOR : B_LIST_BACKGROUND_COLOR);
+    owner->FillRect(rect);
+    BRect avatar(rect.left + 7, rect.top + 8, rect.left + 43, rect.top + 44);
+    if (fAvatar) {
+        owner->SetDrawingMode(B_OP_ALPHA); owner->DrawBitmap(fAvatar.get(),fAvatar->Bounds(),avatar);
+        owner->SetDrawingMode(B_OP_COPY);
+    } else {
+        owner->SetHighColor(fColor); owner->FillEllipse(avatar);
+        owner->SetHighColor(255,255,255); owner->DrawString(fInitial.c_str(),BPoint(avatar.left + 11,avatar.top + 24));
+    }
+    owner->SetHighUIColor(IsSelected() ? B_LIST_SELECTED_ITEM_TEXT_COLOR : B_LIST_ITEM_TEXT_COLOR);
+    BFont font; owner->GetFont(&font); BString name(fName.c_str()), preview(fPreview.c_str());
+    if (fUnread) name << " (" << fUnread << ")";
+    font.TruncateString(&name,B_TRUNCATE_END,std::max(20.0f,rect.Width() - 62));
+    owner->DrawString(name.String(),BPoint(rect.left + 53,rect.top + 22));
+    BFont small(font); small.SetSize(font.Size() * 0.88f); owner->SetFont(&small);
+    small.TruncateString(&preview,B_TRUNCATE_END,std::max(20.0f,rect.Width() - 62));
+    owner->DrawString(preview.String(),BPoint(rect.left + 53,rect.top + 42)); owner->SetFont(&font);
+}
+DiagnosticsWindow::DiagnosticsWindow(const std::string& text)
+    : BWindow(BRect(30,40,820,580),"Parla diagnostics",B_TITLED_WINDOW,B_AUTO_UPDATE_SIZE_LIMITS | B_CLOSE_ON_ESCAPE) {
+    fText = new BTextView("diagnostics", B_WILL_DRAW | B_NAVIGABLE);
+    fText->MakeEditable(false); fText->SetWordWrap(true); fText->SetText(text.c_str());
+    fText->SetExplicitMinSize(BSize(400,220));
+    auto* scroll = new BScrollView("logs",fText,0,false,true);
+    BLayoutBuilder::Group<>(this,B_VERTICAL).SetInsets(B_USE_WINDOW_SPACING)
+        .Add(new BStringView("help","RPC results, core events and server stderr · newest entries below"))
+        .Add(scroll,1).AddGroup(B_HORIZONTAL)
+            .Add(new BCheckBox("pause","Pause updates",new BMessage('paus')))
+            .AddGlue().Add(new BButton("copy","Copy all",new BMessage('copy')))
+            .Add(new BButton("close","Close",new BMessage(B_QUIT_REQUESTED))).End();
+    Show(); fText->ScrollToOffset(fText->TextLength());
+}
+void DiagnosticsWindow::MessageReceived(BMessage* message) {
+    if (message->what == 'logs') {
+        const char* text;
+        if (!fPaused && message->FindString("text",&text) == B_OK) {
+            fText->SetText(text); fText->ScrollToOffset(fText->TextLength());
+        }
+    } else if (message->what == 'paus') fPaused = !fPaused;
+    else if (message->what == 'copy') {
+        if (be_clipboard->Lock()) {
+            be_clipboard->Clear(); be_clipboard->Data()->AddData("text/plain",B_MIME_TYPE,fText->Text(),fText->TextLength());
+            be_clipboard->Commit(); be_clipboard->Unlock();
+        }
+    } else BWindow::MessageReceived(message);
+}
+ProfileWindow::ProfileWindow(BMessenger target, uint32 account, const std::string& name,
+    const std::string& details, bool configured)
+    : BWindow(BRect(0,0,620,360),"Profile settings",B_TITLED_WINDOW,B_AUTO_UPDATE_SIZE_LIMITS | B_CLOSE_ON_ESCAPE),
+      fTarget(target), fAccount(account) {
+    fName = new BTextControl("name","Display name:",name.c_str(),nullptr);
+    auto* info = new BTextView("profileDetails",B_WILL_DRAW | B_NAVIGABLE);
+    info->MakeEditable(false); info->SetWordWrap(true); info->SetText(details.c_str());
+    info->SetExplicitMinSize(BSize(350,130));
+    auto layout = BLayoutBuilder::Group<>(this,B_VERTICAL).SetInsets(B_USE_WINDOW_SPACING);
+    layout.Add(fName).Add(new BScrollView("info",info,0,false,true),1);
+    if (!configured) layout.AddGroup(B_HORIZONTAL)
+        .Add(new BButton("chatmail","Set up Chatmail…",new BMessage('rprf')))
+        .Add(new BButton("email","Use email…",new BMessage('rmai')))
+        .Add(new BButton("link","Link device…",new BMessage('rlnk'))).End();
+    layout.AddGroup(B_HORIZONTAL)
+        .Add(new BButton("delete","Delete profile…",new BMessage('rmcf')))
+        .Add(new BButton("diagnostics","Diagnostics…",new BMessage('diag'))).AddGlue()
+        .Add(new BButton("cancel","Close",new BMessage(B_QUIT_REQUESTED)))
+        .Add(new BButton("ok","Save name",new BMessage('svst'))).End();
+    CenterOnScreen(); Show();
+}
+void ProfileWindow::MessageReceived(BMessage* message) {
+    switch (message->what) {
+    case 'svst': case 'rprf': case 'rmai': case 'rlnk': case 'rmcf': case 'diag': {
+        BMessage result(message->what); result.AddUInt32("account",fAccount); result.AddString("field0",fName->Text());
+        if (fTarget.SendMessage(&result) == B_OK && message->what != 'diag') Quit();
+        break;
+    }
+    default: BWindow::MessageReceived(message);
+    }
 }

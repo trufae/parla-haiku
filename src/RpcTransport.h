@@ -20,6 +20,7 @@ public:
     void Start(const std::string& executable, const std::string& accounts, Receiver receiver);
     uint64_t Call(const std::string& method, const Json& params, int timeoutSeconds = 60);
     void Stop();
+    std::string TakeDiagnostics();
 private:
     void Run();
     void Wake();
@@ -28,7 +29,7 @@ private:
     std::thread fThread;
     std::atomic<bool> fStop{true};
     std::mutex fMutex;
-    std::string fOutput, fDiagnostics;
+    std::string fOutput, fDiagnostics, fNewDiagnostics;
     struct Pending { std::chrono::steady_clock::time_point deadline; };
     std::map<uint64_t, Pending> fPending;
     uint64_t fNextId = 0;
