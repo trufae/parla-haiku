@@ -17,7 +17,13 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
+      - uses: actions/cache@v4
+        id: core-cache
+        with:
+          path: core-artifact
+          key: haiku-core64-${{ hashFiles('.gitmodules', '.github/docker/x86.Dockerfile', 'scripts/build-core.sh', 'scripts/cross-x86_64-core.sh', 'scripts/patch-crates.py', 'patches/**', 'subprojects/chatmail-core/Cargo.lock', 'subprojects/chatmail-core/Cargo.toml') }}-2.63.0
       - name: Cross-build x86_64 Chatmail core
+        if: steps.core-cache.outputs.cache-hit != 'true'
         run: |
           docker build -f .github/docker/x86.Dockerfile \
             --build-arg HAIKU_IMAGE=ghcr.io/haiku/cross-compiler:x86_64-r1beta5 \
