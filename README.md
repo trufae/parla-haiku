@@ -43,10 +43,10 @@ Cross-compilation alone does not verify execution on a 32-bit Haiku system.
 ## Build on 64-bit Haiku
 
 ```sh
-pkgman install rust_bin cmake ninja git openssl3_devel pkgconfig python3.11
+pkgman install rust_bin cmake ninja git openssl3_devel pkgconfig python3.11 llvm21_lld
 git clone --recurse-submodules https://github.com/trufae/parla-haiku.git
 cd parla-haiku
-PYTHON=python3.11 sh scripts/build-core.sh
+RUSTFLAGS="-C link-arg=-fuse-ld=lld" PYTHON=python3.11 sh scripts/build-core.sh
 cmake -S . -B build/gui -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build/gui -j4
 ctest --test-dir build/gui --output-on-failure

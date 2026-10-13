@@ -1,13 +1,14 @@
 name: Haiku x86 (32-bit)
 on:
   push:
+    paths-ignore: ["README.md", "docs/**", ".github/workflows/haiku.yml"]
   pull_request:
   workflow_dispatch:
 permissions:
   contents: read
 concurrency:
   group: haiku-x86-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 jobs:
   x86:
     runs-on: ubuntu-24.04

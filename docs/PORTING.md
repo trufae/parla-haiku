@@ -85,3 +85,9 @@ local paths without changing dependency versions. Cargo still uses `--locked`.
   is unavailable; ordinary sockets and Iroh relays remain enabled.
 
 These patches do not alter TLS, certificate verification or message encryption.
+
+The native CI uses LLVM LLD to link Rust artifacts: the bundled Haiku GNU linker
+rejected a `syn` archive with “ELF section name out of range” during a procedural
+macro link. The C++ frontend continues to use the native GCC toolchain. The x86
+cross-build uses Haiku's official GNU cross-linker, which has linked the full
+server successfully.
