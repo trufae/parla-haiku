@@ -25,14 +25,14 @@ jobs:
           cpu: 4
           prepare: |
             set -eu
-            pkgman install -y rust_bin cmake ninja git openssl3_devel pkgconfig python3.11 llvm21_lld
+            pkgman install -y rust_bin cmake ninja git openssl3_devel pkgconfig python3.11 llvm21_lld llvm21_clang
           run: |
             set -eu
             rustc --version
             cmake -S . -B build/gui -G Ninja -DCMAKE_BUILD_TYPE=Release
             cmake --build build/gui -j4
             ctest --test-dir build/gui --output-on-failure
-            RUSTFLAGS="-C link-arg=-fuse-ld=lld" PYTHON=python3.11 sh scripts/build-core.sh
+            RUSTFLAGS="-C linker=clang -C link-arg=-fuse-ld=lld" PYTHON=python3.11 sh scripts/build-core.sh
             python3.11 tests/core_smoke.py build/core/target/release/deltachat-rpc-server
             sh scripts/package.sh
             sh tests/gui_smoke.sh
