@@ -14,9 +14,17 @@ def gh(*args):
 
 manifest = json.loads(Path("docs/releases/publish.json").read_text())
 revision = manifest["revision"]
+release_revision = os.environ["GITHUB_SHA"]
 version = manifest["version"]
 assert re.fullmatch(r"[0-9a-f]{40}", revision)
+assert re.fullmatch(r"[0-9a-f]{40}", release_revision)
 assert re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", version)
+# Tag the publication commit, including its release notes. Only publishing
+# metadata may differ from the revision which passed the native runtime tests.
+subprocess.run(["git", "diff", "--exit-code", revision, release_revision, "--",
+                ".", ":(exclude)docs/**", ":(exclude)README.md",
+                ":(exclude).github/workflows/release.yml",
+                ":(exclude)scripts/publish-release.py"], check=True)
 repository = os.environ["GH_REPO"]
 assets = Path("release-assets")
 assets.mkdir()
@@ -60,7 +68,7 @@ if screenshot.is_file():
     uploads.append(screenshot)
 # Upload everything to a draft first, so a published release is never incomplete.
 gh("release", "create", tag, *uploads, "--draft", "--prerelease",
-   "--target", revision, "--title", f"Parla for Haiku {version} preview",
+   "--target", release_revision, "--title", f"Parla for Haiku {version} preview",
    "--notes-file", notes)
 gh("release", "edit", tag, "--draft=false")
 print(gh("release", "view", tag, "--json", "url,assets,isDraft,isPrerelease"))
