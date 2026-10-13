@@ -4,7 +4,7 @@ root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 build=${BUILD_DIR:-"$root/build"}
 mkdir -p "$build/core"
 # Export the pinned tree: never modify a developer's submodule checkout.
-git -C "$root/subprojects/chatmail-core" archive HEAD | tar -x -C "$build/core"
+git -c safe.directory="$root/subprojects/chatmail-core" -C "$root/subprojects/chatmail-core" archive HEAD | tar -x -C "$build/core"
 for patch in "$root"/patches/*.patch; do
     patch -d "$build/core" -p1 < "$patch"
 done

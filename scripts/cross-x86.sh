@@ -26,7 +26,7 @@ fi
 test "$(git -C "$openssl" rev-parse HEAD)" = 45e844fa2a14ec92d146bd8f5778ac130b6625fb
 (
     cd "$openssl"
-    ./Configure haiku-x86 no-shared no-tests --prefix="$BUILD_DIR/openssl" --libdir=lib
+    ./Configure haiku-x86 no-asm no-shared no-tests --prefix="$BUILD_DIR/openssl" --libdir=lib
     make -j2
     make install_sw
 )

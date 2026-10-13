@@ -57,7 +57,13 @@ void MessageItem::Update(BView* owner, const BFont* font) {
     float width = std::max(40.0f, owner->Bounds().Width() - 28);
     std::string text;
     if (data.contains("quote") && data["quote"].is_object()) text = "> " + String(data["quote"], "text") + "\n";
-    text += String(data, "text");
+    std::string body = String(data, "text");
+    if (body.size() > 16384) {
+        size_t end = 16384;
+        while (end && (static_cast<unsigned char>(body[end]) & 0xc0) == 0x80) --end;
+        body.resize(end); body += "\n[Long message: use Copy text for the complete contents]";
+    }
+    text += body;
     if (!String(data, "fileName").empty()) text += "\n[Attachment: " + String(data, "fileName") + "]";
     if (!String(data, "error").empty()) text += "\n" + String(data, "error");
     fLines.clear();

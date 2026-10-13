@@ -76,6 +76,9 @@ MainWindow::MainWindow(bool smokeTest)
     profile->AddSeparatorItem();
     MenuItem(profile,"About Parla…",B_ABOUT_REQUESTED)->SetTarget(be_app);
     MenuItem(profile,"Quit",B_QUIT_REQUESTED,'Q');
+    auto* editMenu = new BMenu("Edit"); menu->AddItem(editMenu);
+    MenuItem(editMenu,"Cut",B_CUT,'X'); MenuItem(editMenu,"Copy",B_COPY,'C');
+    MenuItem(editMenu,"Paste",B_PASTE,'V'); MenuItem(editMenu,"Select all",B_SELECT_ALL,'A');
     auto* chat = new BMenu("Chat"); menu->AddItem(chat);
     MenuItem(chat,"New chat…",'newc','J'); MenuItem(chat,"New group…",'newg');
     MenuItem(chat,"Join invitation…",'join'); MenuItem(chat,"Copy group invitation",'ginv');
@@ -84,7 +87,7 @@ MainWindow::MainWindow(bool smokeTest)
     MenuItem(chat,"Archive / unarchive",'arch');
     MenuItem(chat,"Show archived chats",'sarc'); MenuItem(chat,"Refresh",'rfrs','R');
     auto* message = new BMenu("Message"); menu->AddItem(message);
-    MenuItem(message,"Reply",'repl'); MenuItem(message,"Copy text",'copy','C');
+    MenuItem(message,"Reply",'repl'); MenuItem(message,"Copy text",'copy');
     MenuItem(message,"Edit…",'edit'); MenuItem(message,"React…",'reac');
     MenuItem(message,"Open attachment",'open','O'); MenuItem(message,"Save attachment…",'save');
     MenuItem(message,"Details…",'info','I'); MenuItem(message,"Retry sending",'retr');
@@ -119,6 +122,9 @@ MainWindow::MainWindow(bool smokeTest)
     split->SetItemWeight(split->GetLayout()->ItemAt(0),0.28f);
     split->SetItemWeight(split->GetLayout()->ItemAt(1),0.72f);
     fStatus = new BStringView("status","Starting Chatmail…");
+    fStatus->SetTruncation(B_TRUNCATE_END);
+    fTitle->SetTruncation(B_TRUNCATE_END);
+    fDraftLabel->SetTruncation(B_TRUNCATE_END);
     BLayoutBuilder::Group<>(this,B_VERTICAL,0).Add(menu).Add(split).Add(fStatus);
     fAccept->Hide(); fOlder->SetEnabled(false); SetComposeEnabled(false);
     BMessage pulse('tick'); fPulse = std::make_unique<BMessageRunner>(BMessenger(this), &pulse, 500000);
@@ -194,7 +200,7 @@ void MainWindow::SaveDraft() {
     chmod(temp.c_str(),0600); rename(temp.c_str(),(fSettings + "/drafts.json").c_str());
 }
 void MainWindow::SelectAccount(uint32 id) {
-    SaveDraft(); fAccount = id; fChat = 0; ++fGeneration; fRefreshing = false;
+    SaveDraft(); fAccount = id; fChat = 0; ++fGeneration; fRefreshing = false; fRefreshAgain = false;
     fQuote = 0; fAttachment.clear(); fComposer->SetText("");
     Clear(fChats); Clear(fMessages); SetComposeEnabled(false);
     fTitle->SetText("Select a conversation");
@@ -232,7 +238,7 @@ void MainWindow::SetComposeEnabled(bool enabled) {
 }
 void MainWindow::SelectChat(uint32 id) {
     if (!id || id == fChat) return;
-    SaveDraft(); fChat = id; ++fGeneration; fLimit = 100; fRefreshing = false;
+    SaveDraft(); fChat = id; ++fGeneration; fLimit = 100; fRefreshing = false; fRefreshAgain = false;
     fAttachment.clear(); fQuote = 0; fComposer->SetText(""); Clear(fMessages);
     auto draft = fDrafts.find({fAccount,fChat});
     if (draft != fDrafts.end()) {
@@ -308,7 +314,9 @@ void MainWindow::MarkVisible() {
     auto key = std::make_pair(fAccount,fChat); std::string signature = ids.dump();
     if (fSeen[key] == signature) return;
     fSeen[key] = signature;
-    Call("markseen_msgs",Json::array({fAccount,ids}));
+    Call("markseen_msgs",Json::array({fAccount,ids}),[this,key,signature](const Json& result) {
+        if (!result.is_null() && fSeen[key] == signature) fSeen.erase(key);
+    });
 }
 void MainWindow::Events() {
     if (!fReady) return;
@@ -418,6 +426,9 @@ void MainWindow::MessageReceived(BMessage* message) {
     auto selected = SelectedMessage();
     uint32 selectedId = selected.value("id",0u);
     switch (message->what) {
+    case B_CUT: case B_COPY: case B_PASTE: case B_SELECT_ALL:
+        if (CurrentFocus()) CurrentFocus()->MessageReceived(message);
+        break;
     case 'boot': Start(); break;
     case kRPC: {
         Json response = Json::parse(Field(*message,"json"),nullptr,false);
@@ -497,11 +508,13 @@ void MainWindow::MessageReceived(BMessage* message) {
         if (fAccount) Call("get_chat_securejoin_qr_code",Json::array({fAccount,message->what == 'ginv' ? Json(fChat) : Json()}),
             [this](const Json& qr) { if (qr.is_string()) { Copy(qr.get<std::string>()); fStatus->SetText("Invitation copied to clipboard"); } });
         break;
-    case 'memb': if (fChat) Form("Add group member","Enter a contact ID from a message's details.",{{"Contact ID:",""}},'admb',"Add"); break;
+    case 'memb': if (fChat) Form("Add group member","Choose an existing contact by email address.",{{"Email address:",""}},'admb',"Add"); break;
     case 'admb': {
-        char* end = nullptr; unsigned long contact = strtoul(Field(*message,"field0"),&end,10);
-        if (!contact || !end || *end) { ShowError("Enter a valid contact ID"); break; }
-        Call("add_contact_to_chat",Json::array({account,chat,contact}),[this](const Json&){ RefreshMessages(); }); break;
+        std::string address = Field(*message,"field0");
+        Call("lookup_contact_id_by_addr",Json::array({account,address}),[this,account,chat](const Json& contact) {
+            if (!contact.is_number() || contact == 0) { ShowError("Contact not found. Exchange invitations first."); return; }
+            Call("add_contact_to_chat",Json::array({account,chat,contact}),[this](const Json&){ RefreshMessages(); });
+        }); break;
     }
     case 'sarc': fArchived = !fArchived; RefreshChats(); break;
     case 'arch':
