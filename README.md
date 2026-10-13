@@ -8,7 +8,7 @@ with Delta Chat. Name and artwork are provisional.
 Target: x86_64 Haiku R1/beta6. CI builds in an actual Haiku VM.
 
 ```
-pkgman install rust_bin cmake ninja git openssl_devel pkgconfig python311
+pkgman install rust_bin cmake ninja git openssl_devel pkgconfig python3.11
 git submodule update --init --recursive
 sh scripts/build-core.sh
 ```
