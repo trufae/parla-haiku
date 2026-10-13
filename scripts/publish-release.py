@@ -65,9 +65,7 @@ tag = f"v{version}"
 notes = Path(f"docs/releases/{tag}.md")
 assert notes.is_file()
 uploads = [*packages, checksums]
-screenshot = assets / "x86_64" / "parla-native.png"
-if screenshot.is_file():
-    uploads.append(screenshot)
+uploads.extend(sorted((assets / "x86_64").glob("*.png")))
 # Upload everything to a draft first, so a published release is never incomplete.
 gh("release", "create", tag, *uploads, "--draft", "--prerelease",
    "--target", release_revision, "--title", f"Parla for Haiku {version} preview",
