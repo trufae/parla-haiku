@@ -300,7 +300,7 @@ void MainWindow::LoadAccounts() {
         if (fAccount && !ids.count(fAccount) && !fDeletingAccounts.count(fAccount)) {
             fAccount = fChat = fQuote = 0; ++fGeneration; ++fChatRequest;
             fRefreshing = fRefreshAgain = false;
-            fComposer->SetText(""); fAttachment.clear(); fQuote = 0; DraftLabel();
+            fComposer->SetText(""); fAttachment.clear(); DraftLabel();
             Clear(fChats); Clear(fMessages); ClearPreviews(); SetComposeEnabled(false);
         }
         if (!fAccount && !fSelecting && !ids.empty()) {

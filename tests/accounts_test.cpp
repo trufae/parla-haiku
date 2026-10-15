@@ -169,13 +169,15 @@ public:
                 auto* menu = dynamic_cast<BMenuBar*>(fWindow->FindView("menu"));
                 auto* profiles = menu->SubmenuAt(0)->SubmenuAt(4);
                 CHECK(profiles);
-                bool selected = false;
+                bool selected = false, deletedStillListed = false;
                 for (int32 i = 0; i < profiles->CountItems(); ++i) {
                     auto* item = profiles->ItemAt(i);
-                    CHECK(item->Message()->GetUInt32("account",0) != 9);
+                    if (item->Message()->GetUInt32("account",0) == 9) deletedStillListed = true;
                     if (item->Message()->GetUInt32("account",0) == 7 && item->IsMarked()) selected = true;
                 }
+                // The fixture logs requests before their responses reach the UI.
                 fWindow->Unlock(); if (!selected) return;
+                CHECK(!deletedStillListed);
                 fSelectionCalls = SelectionCalls();
                 BMessage away('acct'); away.AddUInt32("account",8); fWindow->PostMessage(&away);
                 BMessage back('acct'); back.AddUInt32("account",7); fWindow->PostMessage(&back);

@@ -2,7 +2,7 @@
 #include <DataIO.h>
 #include <Message.h>
 #include <File.h>
-#include <TranslationUtils.h>
+#include <BitmapStream.h>
 #include <TranslatorRoster.h>
 #include <TranslatorFormats.h>
 #include <View.h>
@@ -29,8 +29,24 @@ std::shared_ptr<BBitmap> Thumbnail(const std::string& path) {
     if (file.InitCheck() != B_OK || file.GetSize(&size) != B_OK || size > 32 * 1024 * 1024) return {};
     RasterBuffer raster;
     if (BTranslatorRoster::Default()->Translate(&file,nullptr,nullptr,&raster,B_TRANSLATOR_BITMAP) != B_OK) return {};
-    raster.Seek(0,SEEK_SET);
-    std::unique_ptr<BBitmap> source(BTranslationUtils::GetBitmap(&raster));
+    TranslatorBitmap header;
+    if (raster.ReadAt(0,&header,sizeof header) != sizeof header) return {};
+    float right = B_BENDIAN_TO_HOST_FLOAT(header.bounds.right);
+    float bottom = B_BENDIAN_TO_HOST_FLOAT(header.bounds.bottom);
+    uint32 rowBytes = B_BENDIAN_TO_HOST_INT32(header.rowBytes);
+    uint32 dataSize = B_BENDIAN_TO_HOST_INT32(header.dataSize);
+    if (B_BENDIAN_TO_HOST_INT32(header.magic) != B_TRANSLATOR_BITMAP
+        || header.bounds.left != 0 || header.bounds.top != 0
+        || !std::isfinite(right) || !std::isfinite(bottom) || right < 0 || bottom < 0
+        || right >= 8192 || bottom >= 8192 || !rowBytes
+        || double(rowBytes) * (floorf(bottom)+1) != dataSize
+        || dataSize > raster.BufferLength() - sizeof header) return {};
+    // Decode the already-translated bitmap directly, without running translators twice.
+    BBitmapStream decoded;
+    BBitmap* bitmapData = nullptr;
+    if (decoded.Write(raster.Buffer(),raster.BufferLength()) != ssize_t(raster.BufferLength())
+        || decoded.DetachBitmap(&bitmapData) != B_OK) return {};
+    std::unique_ptr<BBitmap> source(bitmapData);
     if (!source || source->InitCheck() != B_OK) return {};
     float width = source->Bounds().Width() + 1, height = source->Bounds().Height() + 1;
     float scale = std::min({1.0f,320.0f / width,240.0f / height});
