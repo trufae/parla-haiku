@@ -25,6 +25,7 @@
 #include <Invoker.h>
 #include "DiagnosticText.h"
 #include <cmath>
+#include <algorithm>
 
 namespace {
 void Clear(BListView* list) { while (auto* item = list->RemoveItem(int32(0))) delete item; }
@@ -56,6 +57,7 @@ MainWindow::MainWindow(bool smokeTest)
     create_directory(fSettings.c_str(), 0700); chmod(fSettings.c_str(), 0700);
     BMessage settings; BFile file((fSettings + "/window").c_str(), B_READ_ONLY);
     if (settings.Unflatten(&file) == B_OK) {
+        fShowPreviews = settings.GetBool("previews",true);
         BRect frame;
         if (settings.FindRect("frame", &frame) == B_OK && frame.IsValid()) { MoveTo(frame.LeftTop()); ResizeTo(frame.Width(), frame.Height()); }
     }
@@ -80,6 +82,8 @@ MainWindow::MainWindow(bool smokeTest)
     profile->AddSeparatorItem();
     fAccounts = new BMenu("Switch profile"); profile->AddItem(fAccounts);
     MenuItem(profile,"Profile settings…",'sett');
+    MenuItem(profile,"Manage relays…",'rlys');
+    MenuItem(profile,"Storage and previews…",'stor');
     MenuItem(profile,"Delete this profile…",'rmcf');
     MenuItem(profile,"Open accounts folder",'adir');
     MenuItem(profile,"Copy my invitation",'invt');
@@ -101,7 +105,9 @@ MainWindow::MainWindow(bool smokeTest)
     MenuItem(chat,"Archive / unarchive",'arch');
     MenuItem(chat,"Show archived chats",'sarc'); MenuItem(chat,"Refresh",'rfrs','R');
     auto* message = new BMenu("Message"); menu->AddItem(message);
-    MenuItem(message,"Reply",'repl'); MenuItem(message,"Copy text",'copy');
+    MenuItem(message,"Reply",'repl');
+    MenuItem(message,"Insert emoji…",'emoj','E');
+    MenuItem(message,"Attach sticker…",'astk'); MenuItem(message,"Copy text",'copy');
     MenuItem(message,"Edit…",'edit'); MenuItem(message,"React…",'reac');
     MenuItem(message,"Download attachment",'down');
     MenuItem(message,"Open attachment",'open','O'); MenuItem(message,"Save attachment…",'save');
@@ -124,6 +130,8 @@ MainWindow::MainWindow(bool smokeTest)
     fSend = new BButton("send","Send",new BMessage(kSend));
     fAttach = new BButton("attach","+",new BMessage('atch'));
     fAttach->SetToolTip("Attach a file");
+    fEmoji = new BButton("emoji","☺",new BMessage('emoj'));
+    fEmoji->SetToolTip("Insert emoji (Alt+E)");
     font_height metrics; be_plain_font->GetHeight(&metrics);
     float buttonSize = ceilf(metrics.ascent + metrics.descent + metrics.leading) + 12;
     fAttach->SetExplicitMinSize(BSize(buttonSize,buttonSize));
@@ -134,12 +142,21 @@ MainWindow::MainWindow(bool smokeTest)
     fAccept = new BButton("accept","Accept contact request",new BMessage('acpt'));
     fOlder = new BButton("older","Load earlier messages",new BMessage('oldr'));
     fDraftLabel = new BStringView("draft","");
+    fReplyLabel = new BStringView("reply",""); fReplyLabel->SetTruncation(B_TRUNCATE_END);
+    fCancelReply = new BButton("cancelReply","×",new BMessage('crep'));
+    fCancelReply->SetToolTip("Cancel reply");
+    fRemoveAttachment = new BButton("removeAttachment","×",new BMessage('catt'));
+    fRemoveAttachment->SetToolTip("Remove attachment");
+    auto* draftBar = new BGroupView(B_HORIZONTAL); fDraftBar = draftBar;
+    auto* replyBar = new BGroupView(B_HORIZONTAL); fReplyBar = replyBar;
+    BLayoutBuilder::Group<>(draftBar,B_HORIZONTAL).Add(fDraftLabel,1).Add(fRemoveAttachment,0);
+    BLayoutBuilder::Group<>(replyBar,B_HORIZONTAL).Add(fReplyLabel,1).Add(fCancelReply,0);
     fComposer->SetToolTip("Enter sends · Shift+Enter adds a line");
     auto* conversation = new BGroupView(B_VERTICAL);
     BLayoutBuilder::Group<>(conversation,B_VERTICAL).SetInsets(B_USE_DEFAULT_SPACING)
         .AddGroup(B_HORIZONTAL,B_USE_DEFAULT_SPACING,0).Add(fTitle).AddGlue().Add(fAccept).End()
-        .Add(fOlder,0).Add(scroll,1).Add(fDraftLabel,0)
-        .AddGroup(B_HORIZONTAL,B_USE_DEFAULT_SPACING,0).Add(fAttach,0).Add(composeScroll,1).Add(fSend,0).End();
+        .Add(fOlder,0).Add(scroll,1).Add(fReplyBar,0).Add(fDraftBar,0)
+        .AddGroup(B_HORIZONTAL,B_USE_DEFAULT_SPACING,0).Add(fAttach,0).Add(fEmoji,0).Add(composeScroll,1).Add(fSend,0).End();
     auto* clear = new BMenuItem("Clear attachment / reply", new BMessage('clra'));
     message->AddItem(clear);
     auto* split = new BSplitView(B_HORIZONTAL); split->AddChild(side); split->AddChild(conversation);
@@ -150,11 +167,12 @@ MainWindow::MainWindow(bool smokeTest)
     fTitle->SetTruncation(B_TRUNCATE_END);
     fDraftLabel->SetTruncation(B_TRUNCATE_END);
     BLayoutBuilder::Group<>(this,B_VERTICAL,0).Add(menu,0).Add(split,1).Add(fStatus,0);
-    fDraftLabel->Hide(); fAccept->Hide(); fOlder->Hide(); fOlder->SetEnabled(false); SetComposeEnabled(false);
+    fDraftBar->Hide(); fReplyBar->Hide(); fAccept->Hide(); fOlder->Hide(); fOlder->SetEnabled(false); SetComposeEnabled(false);
     BMessage pulse('tick'); fPulse = std::make_unique<BMessageRunner>(BMessenger(this), &pulse, 500000);
+    fPreviews = std::make_unique<MediaPreview>(BMessenger(this));
     PostMessage('boot');
 }
-MainWindow::~MainWindow() { fPulse.reset(); fRpc.Stop(); Clear(fChats); Clear(fMessages); }
+MainWindow::~MainWindow() { fPulse.reset(); fPreviews.reset(); fRpc.Stop(); Clear(fChats); Clear(fMessages); }
 void MainWindow::ShowError(const std::string& error) {
     std::string text = DiagnosticText(error);
     fLastError = text; fStatus->SetText(text.c_str()); Log("ERROR " + text);
@@ -282,8 +300,8 @@ void MainWindow::LoadAccounts() {
         if (fAccount && !ids.count(fAccount) && !fDeletingAccounts.count(fAccount)) {
             fAccount = fChat = fQuote = 0; ++fGeneration; ++fChatRequest;
             fRefreshing = fRefreshAgain = false;
-            fComposer->SetText(""); fAttachment.clear(); DraftLabel("");
-            Clear(fChats); Clear(fMessages); SetComposeEnabled(false);
+            fComposer->SetText(""); fAttachment.clear(); fQuote = 0; DraftLabel();
+            Clear(fChats); Clear(fMessages); ClearPreviews(); SetComposeEnabled(false);
         }
         if (!fAccount && !fSelecting && !ids.empty()) {
             Call("get_selected_account_id",Json::array(),[this,ids,request](const Json& selected) {
@@ -299,12 +317,12 @@ void MainWindow::LoadAccounts() {
 void MainWindow::SaveDraft() {
     if (!fAccount || !fChat) return;
     fDrafts[{fAccount,fChat}] = {{"account",fAccount},{"chat",fChat},{"text",fComposer->Text()},
-        {"file",fAttachment},{"quote",fQuote}};
+        {"file",fAttachment},{"quote",fQuote},{"quoteText",fQuoteText},{"attachmentType",fAttachmentType}};
     WriteDrafts();
 }
 void MainWindow::WriteDrafts() {
     Json all = Json::array();
-    for (const auto& d : fDrafts) if (!String(d.second,"text").empty() || !String(d.second,"file").empty()) all.push_back(d.second);
+    for (const auto& d : fDrafts) if (!String(d.second,"text").empty() || !String(d.second,"file").empty() || d.second.value("quote",0u)) all.push_back(d.second);
     std::string temp = fSettings + "/drafts.json.tmp";
     { std::ofstream file(temp); file << all.dump(); if (!file) { ShowError("Cannot save draft"); return; } }
     chmod(temp.c_str(),0600); rename(temp.c_str(),(fSettings + "/drafts.json").c_str());
@@ -321,8 +339,8 @@ void MainWindow::SelectAccount(uint32 id, bool force) {
         if (!result.is_null() || fDeletingAccounts.count(id)) { LoadAccounts(); return; }
         SaveDraft(); fAccount = id; fChat = 0; ++fGeneration; ++fChatRequest;
         fRefreshing = fRefreshAgain = false;
-        fQuote = 0; fAttachment.clear(); fComposer->SetText(""); DraftLabel("");
-        Clear(fChats); Clear(fMessages); SetComposeEnabled(false);
+        fQuote = 0; fAttachment.clear(); fComposer->SetText(""); DraftLabel();
+        Clear(fChats); Clear(fMessages); ClearPreviews(); SetComposeEnabled(false);
         fTitle->SetText("Select a conversation");
         for (int32 i = 0; i < fAccounts->CountItems(); ++i) {
             auto* item = fAccounts->ItemAt(i);
@@ -332,10 +350,49 @@ void MainWindow::SelectAccount(uint32 id, bool force) {
         RefreshChats(); Connection(id);
     });
 }
-void MainWindow::DraftLabel(const std::string& text) {
-    fDraftLabel->SetText(text.c_str());
-    if (text.empty() && !fDraftLabel->IsHidden()) fDraftLabel->Hide();
-    if (!text.empty() && fDraftLabel->IsHidden()) fDraftLabel->Show();
+void MainWindow::DraftLabel() {
+    if (!fQuote) fQuoteText.clear();
+    if (fAttachment.empty()) fAttachmentType.clear();
+    BPath file(fAttachment.c_str());
+    fDraftLabel->SetText((std::string(fAttachmentType == "Sticker" ? "Sticker: " : "Attachment: ")
+        + (file.Leaf() ? file.Leaf() : "")).c_str());
+    fReplyLabel->SetText(("Replying to: " + (fQuoteText.empty() ? "message" : fQuoteText)).c_str());
+    if (fAttachment.empty() && !fDraftBar->IsHidden()) fDraftBar->Hide();
+    if (!fAttachment.empty() && fDraftBar->IsHidden()) fDraftBar->Show();
+    if (!fQuote && !fReplyBar->IsHidden()) fReplyBar->Hide();
+    if (fQuote && fReplyBar->IsHidden()) fReplyBar->Show();
+}
+void MainWindow::LoadPreviews() {
+    if (!fShowPreviews) return;
+    BRect visible = fMessages->Bounds();
+    for (int32 i = 0; i < fMessages->CountItems(); ++i) {
+        auto* item = static_cast<MessageItem*>(fMessages->ItemAt(i));
+        if (!visible.Intersects(fMessages->ItemFrame(i))) { item->preview.reset(); continue; }
+        if (!item->HasPreview() || item->preview) continue;
+        item->preview = fPreviews->Get(String(item->data,"file"));
+        if (item->preview) fMessages->InvalidateItem(i);
+    }
+}
+void MainWindow::ClearPreviews() {
+    for (int32 i = 0; i < fMessages->CountItems(); ++i)
+        static_cast<MessageItem*>(fMessages->ItemAt(i))->preview.reset();
+    fPreviews->Clear(); fMessages->Invalidate();
+}
+void MainWindow::Emoji(bool reaction) {
+    auto selected = SelectedMessage();
+    if (!fCanSend || fSending || (reaction && (!selected.value("id",0u) || selected.value("isInfo",false)))) return;
+    BMessage result(reaction ? 'rcok' : 'emok');
+    result.AddUInt32("account",fAccount); result.AddUInt32("chat",fChat);
+    result.AddUInt32("message",selected.value("id",0u));
+    result.AddUInt64("generation",fGeneration);
+    new EmojiPicker(BMessenger(this),result,reaction);
+}
+void MainWindow::Relays(uint32 account) {
+    if (!account || fDeletingAccounts.count(account)) return;
+    Call("list_transports",Json::array({account}),[this,account](const Json& transports) {
+        if (transports.is_array() && !fDeletingAccounts.count(account))
+            new RelaysWindow(BMessenger(this),account,transports);
+    });
 }
 void MainWindow::RefreshChats() {
     if (!fReady || !fAccount) return;
@@ -360,19 +417,22 @@ void MainWindow::RefreshChats() {
     });
 }
 void MainWindow::SetComposeEnabled(bool enabled) {
+    fEmoji->SetEnabled(enabled && !fSending);
+    fCancelReply->SetEnabled(enabled && !fSending); fRemoveAttachment->SetEnabled(enabled && !fSending);
     fCanSend = enabled; fComposer->MakeEditable(enabled && !fSending);
     fSend->SetEnabled(enabled && !fSending); fAttach->SetEnabled(enabled && !fSending);
 }
 void MainWindow::SelectChat(uint32 id) {
     if (!id || id == fChat) return;
     SaveDraft(); fChat = id; ++fGeneration; fLimit = 100; fRefreshing = false; fRefreshAgain = false;
-    fAttachment.clear(); fQuote = 0; fComposer->SetText(""); Clear(fMessages);
+    fAttachment.clear(); fAttachmentType.clear(); fQuoteText.clear(); fQuote = 0; fComposer->SetText(""); Clear(fMessages);
     auto draft = fDrafts.find({fAccount,fChat});
     if (draft != fDrafts.end()) {
         fComposer->SetText(String(draft->second,"text").c_str());
         fAttachment = String(draft->second,"file"); fQuote = draft->second.value("quote",0u);
+        fQuoteText = String(draft->second,"quoteText"); fAttachmentType = String(draft->second,"attachmentType");
     }
-    DraftLabel(fAttachment);
+    DraftLabel();
     SetComposeEnabled(false); RefreshMessages();
 }
 void MainWindow::RefreshMessages(bool older) {
@@ -418,14 +478,15 @@ void MainWindow::RefreshMessages(bool older) {
                 if (!objects.contains(key) || String(objects[key],"kind") != "message") continue;
                 if (id == anchor) anchorIndex = fMessages->CountItems();
                 if (id == selection) selected = fMessages->CountItems();
-                fMessages->AddItem(new MessageItem(objects[key]));
+                auto* item = new MessageItem(objects[key]); item->previewsEnabled = fShowPreviews;
+                fMessages->AddItem(item);
             }
             if (selected >= 0) fMessages->Select(selected);
             if (bottom && !older && fMessages->CountItems()) fMessages->ScrollTo(0,std::max(0.0f,
                 fMessages->ItemFrame(fMessages->CountItems()-1).bottom - fMessages->Bounds().Height()));
             else if (anchorIndex >= 0) fMessages->ScrollTo(0,fMessages->ItemFrame(anchorIndex).top + offset);
             if (++fConnectionTicks >= 20) { fConnectionTicks = 0; Connection(fAccount); }
-        MarkVisible();
+        LoadPreviews(); MarkVisible();
             if (fRefreshAgain) { fRefreshAgain = false; RefreshMessages(); }
         });
     });
@@ -516,7 +577,10 @@ void MainWindow::Send() {
     if (!fReady || !fCanSend || fSending || (!fComposer->TextLength() && fAttachment.empty())) return;
     uint32 account = fAccount, chat = fChat; uint64_t generation = fGeneration;
     Json data = {{"text",fComposer->Text()}};
-    if (!fAttachment.empty()) data["file"] = fAttachment;
+    if (!fAttachment.empty()) {
+        data["file"] = fAttachment;
+        if (fAttachmentType == "Sticker") data["viewtype"] = "Sticker";
+    }
     if (fQuote) data["quotedMessageId"] = fQuote;
     SaveDraft(); fSending = true; SetComposeEnabled(fCanSend); fStatus->SetText("Sending…");
     Call("send_msg",Json::array({account,chat,data}),[this,account,chat,generation](const Json& result) {
@@ -525,7 +589,7 @@ void MainWindow::Send() {
             fDrafts.erase({account,chat});
             if (generation == fGeneration) {
                 fComposer->SetText(""); fQuote = 0; fAttachment.clear(); SaveDraft();
-                DraftLabel(""); fStatus->SetText("Message queued · waiting for server");
+                DraftLabel(); fStatus->SetText("Message queued · waiting for server");
             }
         }
         SetComposeEnabled(fCanSend); RefreshChats(); if (generation == fGeneration) RefreshMessages();
@@ -629,7 +693,7 @@ void MainWindow::DeleteProfile(uint32 account) {
         if (fAccount == account) {
             fAccount = fChat = fQuote = 0; ++fGeneration; ++fChatRequest;
             fRefreshing = fRefreshAgain = false; fAttachment.clear(); fComposer->SetText("");
-            DraftLabel(""); Clear(fChats); Clear(fMessages); SetComposeEnabled(false);
+            DraftLabel(); Clear(fChats); Clear(fMessages); ClearPreviews(); SetComposeEnabled(false);
         }
         for (auto i = fDrafts.begin(); i != fDrafts.end();) {
             if (i->first.first == account) i = fDrafts.erase(i); else ++i;
@@ -654,7 +718,7 @@ void MainWindow::OpenAttachment() {
     if (alert->Go() == 1 && be_roster->Launch(&ref) != B_OK) ShowError("No application could open this attachment");
 }
 bool MainWindow::QuitRequested() {
-    SaveDraft(); BMessage settings; settings.AddRect("frame",Frame());
+    SaveDraft(); BMessage settings; settings.AddRect("frame",Frame()); settings.AddBool("previews",fShowPreviews);
     BFile file((fSettings + "/window").c_str(),B_WRITE_ONLY | B_CREATE_FILE | B_ERASE_FILE); settings.Flatten(&file);
     be_app->PostMessage(B_QUIT_REQUESTED); return true;
 }
@@ -704,11 +768,12 @@ void MainWindow::MessageReceived(BMessage* message) try {
             fLogChanged = false;
         }
         if (++fConnectionTicks >= 20) { fConnectionTicks = 0; Connection(fAccount); }
-        MarkVisible();
+        LoadPreviews(); MarkVisible();
         if (fEventRetryTicks > 0 && --fEventRetryTicks == 0) Events();
         break;
     }
     case 'dtls': if (message->GetInt32("which",0) == 1) Diagnostics(); break;
+    case 'pvrd': LoadPreviews(); break;
     case 'diag': Diagnostics(); Connection(fAccount); break;
     case 'rmcf': RemoveProfile(account); break;
     case 'rmac': if (message->GetInt32("which",0) == 1) DeleteProfile(account); break;
@@ -742,6 +807,61 @@ void MainWindow::MessageReceived(BMessage* message) try {
         break;
     case 'crpr': case 'crml': case 'crlk': CreateProfile(*message); break;
     case 'sett': ProfileSettings(account); break;
+    case 'rlys': Relays(account); break;
+    case 'rlad': {
+        BMessage result('rlok'); result.AddUInt32("account",account);
+        new FormWindow("Add relay","Paste the relay's DCACCOUNT invitation link.",{{"Invitation:",""}},
+            BMessenger(this),result,"Add relay"); break;
+    }
+    case 'rlok': {
+        if (!account || fDeletingAccounts.count(account)) break;
+        std::string invitation = Field(*message,"field0");
+        if (invitation.empty()) { ShowError("Enter a relay invitation"); break; }
+        if (!fRelayPending.insert(account).second) { ShowError("A relay change is still in progress."); break; }
+        fSecrets.push_back(invitation);
+        Call("add_transport_from_qr",Json::array({account,invitation}),[this,account](const Json& result) {
+            fRelayPending.erase(account);
+            if (result.is_null()) { Relays(account); Connection(account); }
+        },300); break;
+    }
+    case 'rlrm': {
+        std::string address = Field(*message,"address");
+        if (!account || address.empty() || fDeletingAccounts.count(account)) break;
+        auto* alert = new BAlert("Remove relay",("Remove " + address + " from profile " + std::to_string(account)
+            + "? This profile will stop receiving mail at this address. Keep at least one working relay.").c_str(),
+            "Cancel","Remove",nullptr,B_WIDTH_AS_USUAL,B_WARNING_ALERT);
+        auto* result = new BMessage('rldo'); result->AddUInt32("account",account); result->AddString("address",address.c_str());
+        alert->Go(new BInvoker(result,this)); break;
+    }
+    case 'rldo': {
+        if (message->GetInt32("which",0) != 1 || !account || fDeletingAccounts.count(account)) break;
+        std::string address = Field(*message,"address");
+        if (!fRelayPending.insert(account).second) { ShowError("A relay change is still in progress."); break; }
+        Call("list_transports",Json::array({account}),[this,account,address](const Json& list) {
+            if (!list.is_array() || list.size() < 2) {
+                fRelayPending.erase(account);
+                if (list.is_array()) ShowError("Add another relay before removing the last one.");
+                return;
+            }
+            Call("delete_transport",Json::array({account,address}),[this,account](const Json& result) {
+                fRelayPending.erase(account);
+                if (result.is_null()) { Relays(account); Connection(account); }
+            });
+        }); break;
+    }
+    case 'stor': {
+        auto* alert = new BAlert("Storage and previews",
+            "Image previews use a bounded memory cache (up to 19 MiB). Clearing it keeps messages and original attachments. "
+            "Visible previews are rebuilt on demand.\n\n"
+            "To free disk space, delete unwanted messages. Chatmail cleans up unused attachments automatically. "
+            "Backups and copies saved elsewhere must be removed separately.",
+            "Close","Clear previews",fShowPreviews ? "Hide previews" : "Show previews");
+        alert->Go(new BInvoker(new BMessage('stdo'),this)); break;
+    }
+    case 'stdo':
+        if (message->GetInt32("which",0) == 2) fShowPreviews = !fShowPreviews;
+        if (message->GetInt32("which",0) > 0) { ClearPreviews(); RefreshMessages(); LoadPreviews(); }
+        break;
     case 'svst':
         if (account) Call("set_config",Json::array({account,"displayname",Field(*message,"field0")}),[this](const Json& result) {
             if (result.is_null()) { LoadAccounts(); fStatus->SetText("Profile name saved"); }
@@ -806,24 +926,44 @@ void MainWindow::MessageReceived(BMessage* message) try {
     case 'acpt':
         if (fChat) Call("accept_chat",Json::array({fAccount,fChat}),[this](const Json&){ RefreshChats(); RefreshMessages(); });
         break;
-    case 'atch': {
+    case 'astk': case 'atch': {
         if (!fCanSend || fSending) break;
-        BMessage result(B_REFS_RECEIVED); result.AddUInt32("account",fAccount); result.AddUInt32("chat",fChat);
+        BMessage result(B_REFS_RECEIVED); result.AddBool("sticker",message->what == 'astk'); result.AddUInt64("generation",fGeneration); result.AddUInt32("account",fAccount); result.AddUInt32("chat",fChat);
         BMessenger target(this);
         fPanel = std::make_unique<BFilePanel>(B_OPEN_PANEL,&target,nullptr,B_FILE_NODE,false,&result); fPanel->Show(); break;
     }
     case B_SIMPLE_DATA: case B_REFS_RECEIVED: {
-        if (!fCanSend || fSending || account != fAccount || chat != fChat) break;
+        if (!fCanSend || fSending || account != fAccount || chat != fChat
+            || message->GetUInt64("generation",fGeneration) != fGeneration) break;
         entry_ref ref; BPath path;
         if (message->FindRef("refs",&ref) == B_OK && BEntry(&ref,true).GetPath(&path) == B_OK) {
             BEntry entry(path.Path());
             if (!entry.IsFile()) { ShowError("Only regular files can be attached"); break; }
-            fAttachment = path.Path(); DraftLabel(fAttachment); SaveDraft();
+            fAttachment = path.Path(); fAttachmentType = message->GetBool("sticker",false) ? "Sticker" : "";
+            DraftLabel(); SaveDraft();
         }
         break;
     }
-    case 'clra': fAttachment.clear(); fQuote = 0; DraftLabel(""); SaveDraft(); break;
-    case 'repl': if (selectedId && fCanSend) { fQuote = selectedId; DraftLabel("Replying to: " + String(selected,"text")); fComposer->MakeFocus(); } break;
+    case 'crep': case 'catt': case 'clra':
+        if (fSending) break;
+        if (message->what != 'crep') fAttachment.clear();
+        if (message->what != 'catt') fQuote = 0;
+        DraftLabel(); SaveDraft(); fComposer->MakeFocus(); break;
+    case 'repl':
+        if (selectedId && fCanSend && !fSending && !selected.value("isInfo",false)) {
+            fQuote = selectedId;
+            fQuoteText = String(selected.value("sender",Json::object()),"displayName","You") + ": "
+                + String(selected,"text");
+            if (String(selected,"text").empty()) fQuoteText += String(selected,"fileName","Message");
+            if (fQuoteText.size() > 240) {
+                size_t end = 240;
+                while (end && (static_cast<unsigned char>(fQuoteText[end]) & 0xc0) == 0x80) --end;
+                fQuoteText.resize(end); fQuoteText += "…";
+            }
+            std::replace(fQuoteText.begin(),fQuoteText.end(),'\n',' ');
+            DraftLabel(); SaveDraft(); fComposer->MakeFocus();
+        }
+        break;
     case 'copy': if (selectedId) Copy(String(selected,"text")); break;
     case 'down':
         if (selectedId) Call("download_full_message",Json::array({fAccount,selectedId}),[this](const Json& result) {
@@ -843,10 +983,42 @@ void MainWindow::MessageReceived(BMessage* message) try {
             Form("Edit message","Update your message for everyone.",{{"Text:",String(selected,"text")}},'edok',"Save");
         break;
     case 'edok': Call("send_edit_request",Json::array({account,msgid,Field(*message,"field0")}),[this](const Json&){ RefreshMessages(); }); break;
-    case 'reac': if (selectedId) Form("React","Enter an emoji; leave empty to remove your reaction.",{{"Emoji:",""}},'rcok',"React"); break;
+    case 'emoj': Emoji(false); break;
+    case 'reac': Emoji(true); break;
+    case 'emok': {
+        if (!fCanSend || fSending || account != fAccount || chat != fChat
+            || message->GetUInt64("generation",fGeneration) != fGeneration) break;
+        int32 start, end; fComposer->GetSelection(&start,&end);
+        fComposer->Delete(start,end); fComposer->Insert(Field(*message,"emoji"));
+        SaveDraft(); fComposer->MakeFocus(); break;
+    }
     case 'rcok': {
-        std::string emoji = Field(*message,"field0"); Json reactions = Json::array(); if (!emoji.empty()) reactions.push_back(emoji);
-        Call("send_reaction",Json::array({account,msgid,reactions}),[this](const Json&){ RefreshMessages(); }); break;
+        if (!account || !msgid || fDeletingAccounts.count(account)) break;
+        std::string emoji = Field(*message,"emoji");
+        // Read fresh reactions: choosing one toggles it, preserving other emojis.
+        Call("get_message",Json::array({account,msgid}),[this,account,msgid,emoji](const Json& value) {
+            if (!value.is_object() || value.contains("_rpcError")) return;
+            Json mine = Json::array();
+            auto reactions = value.find("reactions");
+            if (!emoji.empty() && reactions != value.end() && reactions->is_object()) {
+                auto totals = reactions->find("reactions");
+                if (totals != reactions->end() && totals->is_array()) {
+                    for (const auto& reaction : *totals)
+                        if (reaction.value("isFromSelf",false)) mine.push_back(String(reaction,"emoji"));
+                } else {
+                    auto byContact = reactions->find("reactionsByContact");
+                    if (byContact != reactions->end() && byContact->is_object()
+                        && byContact->contains("1") && (*byContact)["1"].is_array()) mine = (*byContact)["1"];
+                }
+            }
+            if (!emoji.empty()) {
+                auto found = std::find(mine.begin(),mine.end(),Json(emoji));
+                if (found == mine.end()) mine.push_back(emoji); else mine.erase(found);
+            }
+            Call("send_reaction",Json::array({account,msgid,mine}),[this,account](const Json& result) {
+                if (result.is_number() && account == fAccount) RefreshMessages();
+            });
+        }); break;
     }
     case 'retr':
         if (selectedId && selected.value("fromId",0) == 1 && selected.value("state",0) == 24)

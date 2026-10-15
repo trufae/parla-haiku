@@ -9,6 +9,7 @@ int main() {
     uint32_t selected = 7, last = 7;
     uint64_t events = 0;
     bool failedInit = false, sent = false;
+    Json myReactions = Json::array({"❤️"});
     Json staleAccounts; uint64_t staleId = 0;
     std::set<uint32_t> configured{7}, removed;
     std::string line;
@@ -40,11 +41,18 @@ int main() {
         else if (method == "get_full_chat_by_id") result = {{"name","Relay test"},{"canSend",true},{"isEncrypted",true}};
         else if (method == "get_message_ids") result = Json::array({98,99});
         else if (method == "get_messages") result = {{"98",{{"kind","message"},{"id",98},{"chatId",42},{"fromId",2},
-            {"timestamp",1791890100},{"text","Hello from Delta Chat"},{"state",16},{"sender",{{"displayName","Relay test"}}}}},
+            {"timestamp",1791890100},{"viewType","Image"},{"file",getenv("PARLA_TEST_IMAGE") ? getenv("PARLA_TEST_IMAGE") : ""},
+            {"fileName","photo.png"},{"downloadState","Done"},{"text","Hello from Delta Chat"},{"state",16},{"sender",{{"displayName","Relay test"}}}}},
             {"99",{{"kind","message"},{"id",99},{"chatId",42},{"fromId",1},{"timestamp",1791890120},
             {"text","Native Haiku reply"},{"state",sent ? 24 : 28}}}};
         else if (method == "send_msg") { result = 99; sent = true; }
-        else if (method == "get_message") result = {{"error","SMTP fixture: connection refused"}};
+        else if (method == "get_message") {
+            if (params[1] == 98) {
+                Json totals = Json::array();
+                for (const auto& emoji : myReactions) totals.push_back({{"emoji",emoji},{"count",1},{"isFromSelf",true}});
+                result = {{"id",98},{"reactions",{{"reactions",totals}}}};
+            } else result = {{"error","SMTP fixture: connection refused"}};
+        } else if (method == "send_reaction") { myReactions = params[2]; result = 100; }
         else if (method == "is_configured") result = configured.count(account) != 0;
         else if (method == "get_connectivity_html") result = "<html><head><style>HIDDEN_CSS</style></head><body><h3>Incoming messages</h3><li>Connected</li><h3>Outgoing messages</h3><li>SMTP: retry &lt;pending&gt; &amp; waiting</li></body></html>";
         else if (method == "get_config") result = nullptr;

@@ -1,6 +1,7 @@
 #pragma once
 #include "RpcTransport.h"
 #include "Widgets.h"
+#include "MediaPreview.h"
 #include <Button.h>
 #include <FilePanel.h>
 #include <MenuField.h>
@@ -22,7 +23,11 @@ private:
     void Start();
     void LoadAccounts();
     void SelectAccount(uint32 id, bool force = false);
-    void DraftLabel(const std::string& text);
+    void DraftLabel();
+    void LoadPreviews();
+    void ClearPreviews();
+    void Emoji(bool reaction);
+    void Relays(uint32 account);
     void RefreshChats();
     void SelectChat(uint32 id);
     void RefreshMessages(bool older = false);
@@ -51,7 +56,12 @@ private:
     Composer* fComposer;
     BTextControl* fSearch;
     BMenu* fAccounts;
-    BStringView *fTitle, *fStatus, *fDraftLabel;
+    BStringView *fTitle, *fStatus, *fDraftLabel, *fReplyLabel;
+    BView *fDraftBar, *fReplyBar;
+    BButton *fEmoji, *fCancelReply, *fRemoveAttachment;
+    std::unique_ptr<MediaPreview> fPreviews;
+    bool fShowPreviews = true;
+    std::string fQuoteText, fAttachmentType;
     BButton *fSend, *fAttach, *fAccept, *fOlder;
     std::unique_ptr<BFilePanel> fPanel;
     std::unique_ptr<BMessageRunner> fPulse;
@@ -69,7 +79,7 @@ private:
     size_t fLimit = 100;
     std::string fAttachment, fSettings;
     std::string fLastError, fLog, fAccountsPath, fStartup;
-    std::set<uint32> fSetupAccounts;
+    std::set<uint32> fSetupAccounts, fRelayPending;
     BMessenger fDiagnosticsWindow;
     bool fLogChanged = false;
     std::vector<std::string> fSecrets;

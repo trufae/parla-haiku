@@ -11,6 +11,8 @@
 #include <MenuItem.h>
 #include <cmath>
 #include <Directory.h>
+#include <Entry.h>
+#include <cstring>
 #include <MessageRunner.h>
 #include <StringView.h>
 #include <cstdio>
@@ -30,6 +32,14 @@ public:
     int status = 1;
     void ReadyToRun() override {
         try {
+            std::string image = std::string(getenv("PARLA_SETTINGS_PATH")) + "/photo.png";
+            create_directory(getenv("PARLA_SETTINGS_PATH"),0700);
+            auto* bitmap = new BBitmap(BRect(0,0,63,31),B_RGBA32);
+            CHECK(bitmap->InitCheck() == B_OK);
+            memset(bitmap->Bits(),255,bitmap->BitsLength());
+            BBitmapStream stream(bitmap); BFile file(image.c_str(),B_WRITE_ONLY | B_CREATE_FILE | B_ERASE_FILE);
+            CHECK(BTranslatorRoster::Default()->Translate(&stream,nullptr,nullptr,&file,B_PNG_FORMAT) == B_OK);
+            setenv("PARLA_TEST_IMAGE",image.c_str(),1);
             fWindow = new MainWindow(); fWindow->Show();
             BMessage tick('test');
             fTimer = std::make_unique<BMessageRunner>(BMessenger(this), &tick, 100000);
@@ -38,7 +48,7 @@ public:
     void MessageReceived(BMessage* message) override {
         if (message->what != 'test') { BApplication::MessageReceived(message); return; }
         try {
-            CHECK(++fTicks < 180);
+            CHECK(++fTicks < 220);
             if (fStage == 0) {
                 if (!Has("get_chatlist_items_by_entries", Json::array({7,Json::array()}))) return;
                 fWindow->PostMessage('prof'); ++fStage;
@@ -113,6 +123,7 @@ public:
                 auto* composer = dynamic_cast<BTextView*>(fWindow->FindView("message"));
                 auto* messages = dynamic_cast<BListView*>(fWindow->FindView("messages"));
                 bool ready = send && send->IsEnabled() && messages && messages->CountItems() == 2;
+                if (ready && !ConversationActions(messages,composer)) { fWindow->Unlock(); return; }
                 if (ready) { CHECK(composer->Bounds().Height() < 40);
                     auto* attach = fWindow->FindView("attach");
                     CHECK(attach && fabsf(attach->Bounds().Width()-attach->Bounds().Height()) < 2);
@@ -126,7 +137,7 @@ public:
                 fWindow->Unlock(); if (ready) ++fStage;
             } else if (fStage == 15) {
                 if (Status().find("SMTP fixture: connection refused") == std::string::npos) return;
-                CHECK(Has("send_msg",Json::array({9,42,Json{{"text","PRIVATE_MESSAGE_BODY"}}})));
+                CHECK(Has("send_msg",Json::array({9,42,Json{{"text","PRIVATE_MESSAGE_BODY"},{"quotedMessageId",98}}})));
                 fWindow->PostMessage('diag'); ++fStage;
             } else if (fStage == 16) {
                 for (int32 i = 0; i < CountWindows(); ++i) {
@@ -177,6 +188,48 @@ public:
         } catch (const std::exception& e) { Fail(e.what()); }
     }
 private:
+    int fAction = 0;
+    bool ConversationActions(BListView* messages, BTextView* composer) {
+        auto* first = static_cast<MessageItem*>(messages->ItemAt(0));
+        if (fAction == 0) {
+            if (!first->preview) return false;
+            CHECK(first->preview->Bounds().Width() == 63);
+            messages->Select(0); fWindow->PostMessage('repl'); ++fAction;
+        } else if (fAction == 1) {
+            CHECK(!fWindow->FindView("reply")->IsHidden());
+            std::ifstream file(std::string(getenv("PARLA_SETTINGS_PATH"))+"/drafts.json");
+            auto drafts = Json::parse(file);
+            bool saved = false;
+            for (const auto& draft : drafts) if (draft["account"] == 9 && draft["chat"] == 42) saved = draft["quote"] == 98;
+            CHECK(saved);
+            entry_ref ref; CHECK(get_ref_for_path(getenv("PARLA_TEST_IMAGE"),&ref) == B_OK);
+            BMessage attach(B_REFS_RECEIVED); attach.AddRef("refs",&ref); fWindow->PostMessage(&attach); ++fAction;
+        } else if (fAction == 2) {
+            CHECK(!fWindow->FindView("reply")->IsHidden()); CHECK(!fWindow->FindView("draft")->IsHidden());
+            fWindow->PostMessage('catt'); fWindow->PostMessage('reac'); ++fAction;
+        } else if (fAction == 3) {
+            CHECK(fWindow->FindView("draft")->IsHidden()); CHECK(!fWindow->FindView("reply")->IsHidden());
+            if (Click("React with emoji","chooseEmoji")) ++fAction;
+        } else if (fAction == 4) {
+            if (!Has("send_reaction",Json::array({9,98,Json::array({"❤️","👍"})}))) return false;
+            fWindow->PostMessage('reac'); ++fAction;
+        } else if (fAction == 5) {
+            if (Click("React with emoji","chooseEmoji")) ++fAction;
+        } else if (fAction == 6) {
+            if (!Has("send_reaction",Json::array({9,98,Json::array({"❤️"})}))) return false;
+            fWindow->PostMessage('emoj'); ++fAction;
+        } else if (fAction == 7) {
+            if (Click("Insert emoji","chooseEmoji")) ++fAction;
+        } else if (fAction == 8) {
+            if (std::string(composer->Text()) != "👍") return false;
+            BMessage stale('emok'); stale.AddString("emoji","WRONG_CHAT"); stale.AddUInt64("generation",UINT64_MAX);
+            fWindow->PostMessage(&stale); ++fAction;
+        } else {
+            CHECK(std::string(composer->Text()) == "👍");
+            return true;
+        }
+        return false;
+    }
     size_t fSelectionCalls = 0;
     uint32 fLastSelected = 0;
     size_t SelectionCalls() {
