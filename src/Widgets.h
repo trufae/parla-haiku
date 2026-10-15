@@ -23,11 +23,14 @@ public:
     void Update(BView* owner, const BFont* font) override;
     void DrawItem(BView* owner, BRect rect, bool complete = false) override;
     Json data;
+    std::shared_ptr<BBitmap> preview;
+    bool HasPreview() const;
+    bool previewsEnabled = true;
 private:
     std::vector<std::string> fLines;
     std::string fHeading, fTime;
     bool fOutgoing = false;
-    float fLineHeight = 18;
+    float fLineHeight = 18, fMediaHeight = 0;
 };
 class MessageList : public BListView {
 public:
@@ -77,4 +80,29 @@ private:
     BMessenger fTarget;
     uint32 fAccount;
     BTextControl* fName;
+};
+
+class EmojiPicker : public BWindow {
+public:
+    EmojiPicker(BMessenger target, BMessage result, bool reaction);
+    ~EmojiPicker() override;
+    void MessageReceived(BMessage* message) override;
+private:
+    void Filter();
+    BMessenger fTarget;
+    BMessage fResult;
+    BTextControl *fSearch, *fCustom;
+    BListView* fList;
+};
+
+class RelaysWindow : public BWindow {
+public:
+    RelaysWindow(BMessenger target, uint32 account, const Json& transports);
+    ~RelaysWindow() override;
+    void MessageReceived(BMessage* message) override;
+private:
+    BMessenger fTarget;
+    uint32 fAccount;
+    BListView* fList;
+    std::vector<std::string> fAddresses;
 };

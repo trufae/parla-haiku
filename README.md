@@ -40,6 +40,35 @@ server as `DC_ACCOUNTS_PATH`. An explicit environment override is respected.
 The composer is compact, the chat list displays avatars and previews, and message
 timestamps and delivery states appear in a smaller footer.
 
+### Conversation media and actions
+
+- Downloaded pictures, GIFs and stickers have inline previews. Haiku's installed
+  image translators determine supported formats; animations show a still frame.
+  Double-click to open the original in its associated application. Unsupported
+  or oversized images retain the normal attachment Open / Save actions.
+- Previews are decoded on a worker, requested only for visible messages, and
+  cached as thumbnails (64 entries, at most 320 × 240 each). Encoded files and
+  translated rasters are each limited to 32 MiB for previews.
+- **☺** in the composer, or **Message → Insert emoji** (Alt+E), opens a
+  searchable emoji picker. Paste other emoji, including skin tones and joined
+  sequences, into its separate input field.
+- Right-click a message to **Reply** or **React**. A reply banner names the
+  original sender and stays visible alongside attachments. Each has its own
+  cancel button. Reply-only drafts and their labels survive chat/profile changes
+  and restarts. Selecting an existing reaction toggles it without removing your
+  other emoji; the picker also offers **Remove my reactions**.
+- **Message → Attach sticker** sends a selected image as a Chatmail sticker.
+  It is staged in the composer, with the same Send/cancel flow as other files.
+- **Profile → Manage relays** lists transport addresses and servers, accepts a
+  relay's `DCACCOUNT` invitation link, and removes a selected relay after
+  confirmation. Parla checks the current list and keeps the last relay.
+- **Profile → Storage and previews** clears disposable preview memory or
+  disables inline previews. The visibility preference is saved. It explains how
+  to free disk space without deleting Chatmail-owned blobs behind its back.
+
+Animated playback, sticker-pack management, and inline audio/video playback are
+not included yet. Their files can still be opened externally.
+
 ## Packages and architectures
 
 Download the [0.1.5 preview](https://github.com/trufae/parla-haiku/releases/tag/v0.1.5)

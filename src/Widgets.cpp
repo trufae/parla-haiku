@@ -13,6 +13,7 @@
 #include <ScrollView.h>
 #include <CheckBox.h>
 #include <TranslationUtils.h>
+#include <cctype>
 
 std::string String(const Json& value, const char* key, const std::string& fallback) {
     auto i = value.find(key);
@@ -59,13 +60,19 @@ MessageItem::MessageItem(Json value) : data(std::move(value)) {
     if (data.value("isEdited", false)) fTime += " · edited";
     if (!data.value("isInfo",false) && !data.value("showPadlock",true)) fTime += " · email";
 }
+bool MessageItem::HasPreview() const {
+    auto type = String(data,"viewType");
+    return !String(data,"file").empty() && String(data,"downloadState","Done") == "Done"
+        && (type == "Image" || type == "Gif" || type == "Sticker"
+            || String(data,"fileMime").find("image/") == 0);
+}
 void MessageItem::Update(BView* owner, const BFont* font) {
     BListItem::Update(owner, font);
     font_height metrics; font->GetHeight(&metrics);
     fLineHeight = ceilf(metrics.ascent + metrics.descent + metrics.leading) + 2;
     float width = std::max(40.0f, owner->Bounds().Width() - 70);
     std::string text;
-    if (data.contains("quote") && data["quote"].is_object()) text = "> " + String(data["quote"], "text") + "\n";
+    if (data.contains("quote") && data["quote"].is_object()) text = "> " + String(data["quote"], "authorDisplayName") + ": " + String(data["quote"], "text") + "\n";
     std::string body = String(data, "text");
     if (body.size() > 16384) {
         size_t end = 16384;
@@ -82,7 +89,7 @@ void MessageItem::Update(BView* owner, const BFont* font) {
     if (data.contains("reactions") && data["reactions"].is_object()) {
         auto reactions = data["reactions"].value("reactions", Json::array());
         if (reactions.is_array()) for (const auto& reaction : reactions)
-            text += "\n" + String(reaction, "emoji") + "  " + std::to_string(reaction.value("count", 0u));
+            text += "\n" + String(reaction, "emoji") + "  " + std::to_string(reaction.value("count", 0u)) + (reaction.value("isFromSelf",false) ? " · you" : "");
     }
     fLines.clear();
     std::istringstream input(text); std::string paragraph;
@@ -101,7 +108,8 @@ void MessageItem::Update(BView* owner, const BFont* font) {
         }
     }
     if (fLines.empty()) fLines.emplace_back();
-    SetHeight((fLines.size() + 2) * fLineHeight + 24);
+    fMediaHeight = previewsEnabled && HasPreview() ? (String(data,"viewType") == "Sticker" ? 168 : 240) : 0;
+    SetHeight((fLines.size() + 2) * fLineHeight + 24 + fMediaHeight);
 }
 void MessageItem::DrawItem(BView* owner, BRect rect, bool) {
     owner->SetHighUIColor(B_LIST_BACKGROUND_COLOR); owner->FillRect(rect);
@@ -122,6 +130,19 @@ void MessageItem::DrawItem(BView* owner, BRect rect, bool) {
     BPoint point(bubble.left + 10, bubble.top + fLineHeight);
     owner->SetFont(&small); owner->DrawString(fHeading.c_str(), point); owner->SetFont(&font);
     for (const auto& line : fLines) { point.y += fLineHeight; owner->DrawString(line.c_str(), point); }
+    if (fMediaHeight) {
+        BRect area(bubble.left + 10, point.y + 8, bubble.right - 10, point.y + fMediaHeight);
+        if (preview) {
+            float scale = std::min({1.0f,area.Width() / (preview->Bounds().Width()+1),
+                area.Height() / (preview->Bounds().Height()+1)});
+            BRect dest(0,0,(preview->Bounds().Width()+1)*scale-1,(preview->Bounds().Height()+1)*scale-1);
+            dest.OffsetTo(area.left,area.top);
+            owner->SetDrawingMode(B_OP_ALPHA);
+            owner->SetBlendingMode(B_PIXEL_ALPHA,B_ALPHA_OVERLAY);
+            owner->DrawBitmap(preview.get(),preview->Bounds(),dest);
+            owner->SetDrawingMode(B_OP_COPY);
+        } else owner->DrawString("Image · double-click to open",BPoint(area.left,area.top+fLineHeight));
+    }
     owner->SetFont(&small);
     owner->DrawString(fTime.c_str(), BPoint(std::max(bubble.left + 10, bubble.right - 10 - small.StringWidth(fTime.c_str())), bubble.bottom - 7));
     owner->SetFont(&font);
@@ -145,7 +166,7 @@ void MessageList::MouseDown(BPoint point) {
         if (index < 0) return;
         Select(index);
         BPopUpMenu menu("Message");
-        for (auto item : {std::pair<const char*, uint32>{"Reply", 'repl'}, {"Copy text", 'copy'},
+        for (auto item : {std::pair<const char*, uint32>{"Reply", 'repl'}, {"React…", 'reac'}, {"Copy text", 'copy'}, {"Save attachment…", 'save'},
                 {"Download attachment", 'down'}, {"Open attachment", 'open'}, {"Message details…", 'info'}, {"Retry sending", 'retr'},
                 {"Delete…", 'dele'}})
             menu.AddItem(new BMenuItem(item.first, new BMessage(item.second)));
@@ -287,4 +308,124 @@ void ProfileWindow::MessageReceived(BMessage* message) {
     }
     default: BWindow::MessageReceived(message);
     }
+}
+
+namespace {
+struct Emoji { const char* text; const char* name; };
+const Emoji kEmojis[] = {
+    {"👍","thumbs up yes like"}, {"👎","thumbs down no"}, {"❤️","red heart love"},
+    {"😂","laugh tears joy"}, {"😊","smile happy"}, {"😍","heart eyes love"},
+    {"🥰","smiling hearts"}, {"😘","kiss"}, {"😎","cool sunglasses"},
+    {"🤔","thinking"}, {"😮","surprised wow"}, {"😢","cry sad"},
+    {"😭","sob crying"}, {"😡","angry"}, {"😅","sweat smile relieved"},
+    {"😉","wink"}, {"🙃","upside down"}, {"🤣","rolling laughing"},
+    {"😴","sleep tired"}, {"🤯","mind blown"}, {"🥳","party celebrate"},
+    {"🤗","hug"}, {"🫠","melting"}, {"🤦","facepalm"},
+    {"🤷","shrug"}, {"👀","eyes looking"}, {"💯","hundred perfect"},
+    {"🎉","party celebration"}, {"🔥","fire"}, {"✨","sparkles"},
+    {"✅","check done yes"}, {"❌","cross no"}, {"❓","question"},
+    {"⚠️","warning"}, {"🙏","thanks please pray"}, {"👏","clap applause"},
+    {"👋","wave hello goodbye"}, {"👌","okay"}, {"🤞","fingers crossed luck"},
+    {"💪","strong muscle"}, {"🫶","heart hands"}, {"✌️","peace victory"},
+    {"💔","broken heart"}, {"💚","green heart"}, {"💙","blue heart"},
+    {"💜","purple heart"}, {"🐱","cat"}, {"🐶","dog"},
+    {"🐾","paw prints"}, {"🌻","sunflower"}, {"🌱","seedling plant vegan"},
+    {"🌍","earth world"}, {"☀️","sun"}, {"🌙","moon night"},
+    {"🌈","rainbow"}, {"☕","coffee tea"}, {"🍕","pizza"},
+    {"🎂","birthday cake"}, {"🎁","gift present"}, {"🎵","music"},
+    {"🚀","rocket"}, {"💻","computer coding"}, {"📷","camera photo"},
+    {"📍","location pin"}, {"🏠","home"}, {"⏳","waiting hourglass"},
+};
+class EmojiItem : public BStringItem {
+public:
+    explicit EmojiItem(const Emoji& value) : BStringItem((std::string(value.text)+"   "+value.name).c_str()), emoji(value.text) {}
+    std::string emoji;
+};
+}
+EmojiPicker::EmojiPicker(BMessenger target, BMessage result, bool reaction)
+    : BWindow(BRect(0,0,360,420),reaction ? "React with emoji" : "Insert emoji",B_TITLED_WINDOW,
+        B_AUTO_UPDATE_SIZE_LIMITS | B_NOT_ZOOMABLE | B_CLOSE_ON_ESCAPE), fTarget(target), fResult(result) {
+    fSearch = new BTextControl("emojiSearch","Search:","",nullptr);
+    fSearch->SetModificationMessage(new BMessage('eflt'));
+    fList = new BListView("emojis"); fList->SetInvocationMessage(new BMessage('epck'));
+    auto* scroll = new BScrollView("emojiScroll",fList,0,false,true);
+    scroll->SetExplicitMinSize(BSize(300,250));
+    fCustom = new BTextControl("customEmoji","Or paste emoji:","",nullptr);
+    fCustom->TextView()->SetMaxBytes(64);
+    auto* choose = new BButton("chooseEmoji",reaction ? "React" : "Insert",new BMessage('epck'));
+    auto layout = BLayoutBuilder::Group<>(this,B_VERTICAL).SetInsets(B_USE_WINDOW_SPACING)
+        .Add(fSearch).Add(scroll).Add(fCustom);
+    if (reaction) layout.Add(new BButton("removeReaction","Remove my reactions",new BMessage('erem')));
+    layout.AddGroup(B_HORIZONTAL).AddGlue()
+        .Add(new BButton("cancel","Cancel",new BMessage(B_QUIT_REQUESTED))).Add(choose).End();
+    SetDefaultButton(choose); Filter(); CenterOnScreen(); fSearch->MakeFocus(); Show();
+}
+void EmojiPicker::Filter() {
+    while (auto* item = fList->RemoveItem(int32(0))) delete item;
+    std::string query = fSearch->Text();
+    std::transform(query.begin(),query.end(),query.begin(),[](unsigned char c) { return std::tolower(c); });
+    for (const auto& emoji : kEmojis)
+        if (query.empty() || std::string(emoji.name).find(query) != std::string::npos || query == emoji.text)
+            fList->AddItem(new EmojiItem(emoji));
+    if (fList->CountItems()) fList->Select(0);
+}
+void EmojiPicker::MessageReceived(BMessage* message) {
+    if (message->what == 'eflt') { Filter(); return; }
+    if (message->what == 'epck' || message->what == 'erem') {
+        auto* item = dynamic_cast<EmojiItem*>(fList->ItemAt(fList->CurrentSelection()));
+        std::string emoji = fCustom->Text();
+        if (emoji.empty() && item) emoji = item->emoji;
+        if (message->what == 'epck' && emoji.empty()) return;
+        BMessage result(fResult); result.AddString("emoji",message->what == 'erem' ? "" : emoji.c_str());
+        if (fTarget.SendMessage(&result) == B_OK) {
+            Quit();
+        }
+        return;
+    }
+    BWindow::MessageReceived(message);
+}
+
+RelaysWindow::RelaysWindow(BMessenger target, uint32 account, const Json& transports)
+    : BWindow(BRect(0,0,520,320),("Relays · profile " + std::to_string(account)).c_str(),B_TITLED_WINDOW,
+        B_AUTO_UPDATE_SIZE_LIMITS | B_NOT_ZOOMABLE | B_CLOSE_ON_ESCAPE),fTarget(target),fAccount(account) {
+    fList = new BListView("relays");
+    for (const auto& transport : transports) {
+        auto address = String(transport,"addr");
+        if (address.empty()) continue;
+        fAddresses.push_back(address);
+        fList->AddItem(new BStringItem((address + " · IMAP: " + String(transport,"imapServer","automatic")
+            + " · SMTP: " + String(transport,"smtpServer","automatic")).c_str()));
+    }
+    auto* scroll = new BScrollView("relayScroll",fList,0,false,true);
+    scroll->SetExplicitMinSize(BSize(480,150));
+    BLayoutBuilder::Group<>(this,B_VERTICAL).SetInsets(B_USE_WINDOW_SPACING)
+        .Add(new BStringView("hint","Relay addresses used by this profile"))
+        .Add(scroll)
+        .AddGroup(B_HORIZONTAL)
+            .Add(new BButton("addRelay","Add relay…",new BMessage('rlad')))
+            .Add(new BButton("removeRelay","Remove selected…",new BMessage('rlrm'))).AddGlue()
+            .Add(new BButton("close","Close",new BMessage(B_QUIT_REQUESTED))).End();
+    CenterOnScreen(); Show();
+}
+void RelaysWindow::MessageReceived(BMessage* message) {
+    if (message->what == 'rlad' || message->what == 'rlrm') {
+        BMessage result(message->what); result.AddUInt32("account",fAccount);
+        if (message->what == 'rlrm') {
+            int32 index = fList->CurrentSelection();
+            if (index < 0 || size_t(index) >= fAddresses.size()) return;
+            result.AddString("address",fAddresses[index].c_str());
+        }
+        if (fTarget.SendMessage(&result) == B_OK) {
+            Quit();
+        }
+        return;
+    }
+    BWindow::MessageReceived(message);
+}
+
+EmojiPicker::~EmojiPicker() {
+    while (auto* item = fList->RemoveItem(int32(0))) delete item;
+}
+RelaysWindow::~RelaysWindow() {
+    while (auto* item = fList->RemoveItem(int32(0))) delete item;
 }
